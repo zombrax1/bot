@@ -1,4 +1,5 @@
 
+
 # Whiteout Survival Bot
 
 ## Description
@@ -8,7 +9,10 @@ This bot will automatically tell you when members of your Alliance change their 
 
 You can also see their profile photos larger than usual
 ---
-
+![Furnace Level Changes](https://serioyun.com/gif/1.png)
+![User Info](https://serioyun.com/gif/2.png)
+![Nickname Changes](https://serioyun.com/gif/3.png)
+![ALLIANCE LIST](https://serioyun.com/gif/4.png)
 ## How to Use?
 
 When you first run the bot, don't forget to fill in the `settings.txt` file with:
