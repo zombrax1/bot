@@ -60,13 +60,14 @@ ALLIANCE_NAME = settings['ALLIANCE_NAME']
 async def add_user(ctx, ids: str):
     added = []
     already_exists = []
+    
     id_list = ids.split(',')
 
-    total_ids = len(id_list)
+    total_ids = len(id_list) 
     for index, fid in enumerate(id_list):
         fid = fid.strip()
         if not fid:
-            already_exists.append("Empty ID provided")
+            already_exists.append(f"{fid} - Empty ID provided")
             continue
 
         current_time = int(time.time() * 1000)
@@ -76,6 +77,10 @@ async def add_user(ctx, ids: str):
 
         url = 'https://wos-giftcode-api.centurygame.com/api/player'
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
 
         async with aiohttp.ClientSession() as session:
             while True:
@@ -101,26 +106,50 @@ async def add_user(ctx, ids: str):
                             if result is None:
                                 c.execute("INSERT INTO users (fid, nickname, furnace_lv) VALUES (?, ?, ?)", (fid, nickname, furnace_lv))
                                 conn.commit()
-                                added.append(f"{fid} {nickname} added")
-                                print(f"Added: {fid} - {nickname}")
+                                added.append({
+                                    'fid': fid,
+                                    'nickname': nickname,
+                                    'furnace_lv': furnace_lv
+                                })
+                                print(f"Added: {fid} - {nickname}") 
                             else:
                                 already_exists.append(f"{fid} - Already exists")
                         else:
                             already_exists.append(f"{fid} - Nickname not found")
-                        break
+                        break 
 
-                    elif response.status == 400:
-                        error_message = await response.text()
-                        if "Invalid Form Body" in error_message:
-                            await ctx.send(f"Error with ID {fid}: Message too long. Waiting 1 minute...")
-                            await asyncio.sleep(60)  
-                            continue  
-                        else:
-                            already_exists.append(f"{fid} - Request failed with status: {response.status}")
-                            break  
+                    elif response.status == 429:
+                        print(f"Rate limit reached for {fid}. Waiting 1 minute...") 
+                        await asyncio.sleep(60) 
+                        continue 
+
                     else:
                         already_exists.append(f"{fid} - Request failed with status: {response.status}")
-                        break
+                        break  
+
+    if added:
+        embed = discord.Embed(
+            title="Added People",
+            description="The following users were successfully added:",
+            color=discord.Color.green()
+        )
+
+        for user in added:
+            embed.add_field(
+                name=user['nickname'],
+                value=f"Furnace Level: {user['furnace_lv']}\nID: {user['fid']}",
+                inline=False
+            )
+
+        await ctx.send(embed=embed)
+
+    if already_exists:
+        embed = discord.Embed(
+            title="Already Exists / No Data Found",
+            description="\n".join(already_exists),
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
 
     msg_parts = []
     if added:
@@ -146,32 +175,78 @@ async def remove_user(ctx, fid: int):
 
 @bot.command(name='gift')
 async def use_giftcode(ctx, giftcode: str):
+    await ctx.message.delete()
+
+    notify_message = await ctx.send(
+        content="Alliance list is being checked for Gift Code usage, the process will be completed in approximately 4 minutes."
+    )
+    notify_message = await ctx.send(
+        content="https://tenor.com/view/typing-gif-3043127330471612038"
+    )
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
     c.execute("SELECT * FROM users")
     users = c.fetchall()
-    results = []
-    
-    for user in users:
+    success_results = []
+    failure_results = []
+
+    for index, user in enumerate(users):
         fid, nickname, furnace_lv = user
         current_time = int(time.time() * 1000)
         form = f"fid={fid}&cdk={giftcode}&time={current_time}"
         sign = hashlib.md5((form + SECRET).encode('utf-8')).hexdigest()
         form = f"sign={sign}&{form}"
-        
+
         url = 'https://wos-giftcode-api.centurygame.com/api/giftcode/redeem'
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=form) as response:
-                if response.status == 200:
-                    results.append(f"{fid} - {nickname} - USED")
-                else:
-                    results.append(f"{fid} - {nickname} - NOT USED")
-    
-    result_message = "\n".join(results)
-    await ctx.send(f"Sonuçlar:\n{result_message}")
+        while True:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, data=form, ssl=ssl_context) as response:
+                    if response.status == 200:
+                        success_results.append(f"{fid} - {nickname} - USED")
+                        break 
+                    elif response.status == 429: 
+                        print(f"Rate limit reached for {fid}. Waiting 1 minute...")  # Log to console
+                        await asyncio.sleep(60) 
+                        continue
+                    else:
+                        failure_results.append(f"{fid} - {nickname} - USED BEFORE")
+                        break 
 
-def fix_rtl(text):
-    return f"\u202B{text}\u202C"
+    await notify_message.delete()
+
+    def chunk_results(results, chunk_size=25):
+        for i in range(0, len(results), chunk_size):
+            yield results[i:i + chunk_size]
+
+    for chunk in chunk_results(success_results):
+        success_embed = discord.Embed(
+            title=f"{giftcode} Gift Code - Success",
+            color=discord.Color.green()
+        )
+        success_embed.set_footer(text="Developer: Reloisback | These users have not redeemed the gift code before. Check your in-game mail")
+        
+        for result in chunk:
+            success_embed.add_field(name=result, value="\u200b", inline=False)
+        
+        await ctx.send(embed=success_embed)
+
+    # Send failure results in chunks
+    for chunk in chunk_results(failure_results):
+        failure_embed = discord.Embed(
+            title=f"{giftcode} Gift Code - Failed",
+            color=discord.Color.red()
+        )
+        failure_embed.set_footer(text="Developer: Reloisback | These users have already redeemed the gift code.")
+        
+        for result in chunk:
+            failure_embed.add_field(name=result, value="\u200b", inline=False)
+        
+        await ctx.send(embed=failure_embed)
 
 @bot.command(name='allist')
 async def show_users(ctx):
