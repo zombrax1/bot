@@ -2,6 +2,22 @@
 
 # Whiteout Survival Bot
 
+**24.10.2024 Update Notes;**
+
+
+ 1. 1.Fixed SSL issue with /allistadd command
+ 2. In bulk additions to the list, for example, when 10 people are added to the list, it has been fixed to send a notification message
+    separately for 10 people in the chat. When the addition process is
+    finished in a single 1 embed, it will notify with a single 1
+    message
+
+![Added People](https://serioyun.com/gif/addedpe.png)
+
+3. Gift code activated. Here is how to use it;
+/gift giftcode
+This code will use the giftcode that you automatically type to the contacts in your alliance list, showing the successfully used contacts and the previously used contacts separately.
+(Use it when there is no automatic check, the average time to check 100 people is 4-5 minutes, if you use it during automatic check, you may get an error due to API limit exceeding)
+
 ## Description
 
 This bot is developed for Whiteout Survival players to enhance their Discord channel experience.
