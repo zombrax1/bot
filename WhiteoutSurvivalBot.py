@@ -235,7 +235,6 @@ async def use_giftcode(ctx, giftcode: str):
         
         await ctx.send(embed=success_embed)
 
-    # Send failure results in chunks
     for chunk in chunk_results(failure_results):
         failure_embed = discord.Embed(
             title=f"{giftcode} Gift Code - Failed",
@@ -368,7 +367,6 @@ async def check_agslist(channel):
     furnace_changes = []
     nickname_changes = []
 
-    # URL tanımı
     url = 'https://wos-giftcode-api.centurygame.com/api/player'
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
