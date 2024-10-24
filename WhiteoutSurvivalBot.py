@@ -24,6 +24,12 @@ wos_player_info_url = "https://wos-giftcode-api.centurygame.com/api/player"
 wos_giftcode_url = "https://wos-giftcode-api.centurygame.com/api/gift_code"
 wos_giftcode_redemption_url = "https://wos-giftcode.centurygame.com"
 wos_encrypt_key = "tB87#kPtkxqOS2"
+retry_config = Retry(
+    total=5,               # Toplam deneme sayısı
+    backoff_factor=1,       # Geriye dönüş faktörü (yavaşlatma)
+    status_forcelist=[429], # Hangi hata kodlarında yeniden denenecek
+    allowed_methods=["POST"] # Yeniden denemeye izin verilen HTTP yöntemleri
+)
 def load_settings():
     default_settings = {
         'BOT_TOKEN': '',
