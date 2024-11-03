@@ -132,7 +132,7 @@ class GiftCommand(commands.Cog):
 
         for user in users:
             fid, nickname, _ = user
-            
+
             self.c.execute(
                 "SELECT status FROM user_giftcodes WHERE fid = ? AND giftcode = ?", 
                 (fid, giftcode)
@@ -141,28 +141,44 @@ class GiftCommand(commands.Cog):
             
             if status:
                 if status[0] in ["SUCCESS", "ALREADY_RECEIVED"]:
-                    print(Fore.GREEN + f"User {fid} has already used the code {giftcode}. Skipping." + Style.RESET_ALL)
+                    print(f"[INFO] User {fid} ({nickname}) has already used the code {giftcode}. Skipping.")
                     received_results.append(f"{fid} - {nickname} - ALREADY RECEIVED")
                     continue
+                else:
+                    print(f"[DEBUG] User {fid} has a different status for code {giftcode}: {status[0]}")
 
             try:
                 _, response_status = self.claim_giftcode_rewards_wos(player_id=fid, giftcode=giftcode)
                 
                 if response_status == "SUCCESS":
                     success_results.append(f"{fid} - {nickname} - USED")
+                    print(f"[SUCCESS] User {fid} ({nickname}) successfully used the code {giftcode}.")
                     self.c.execute(
-                        "INSERT INTO user_giftcodes (fid, giftcode, status) VALUES (?, ?, ?) ON CONFLICT(fid, giftcode) DO UPDATE SET status = ?",
-                        (fid, giftcode, "SUCCESS", "SUCCESS")
+                        """
+                        INSERT INTO user_giftcodes (fid, giftcode, status) 
+                        VALUES (?, ?, ?) 
+                        ON CONFLICT(fid, giftcode) 
+                        DO UPDATE SET status = excluded.status
+                        """,
+                        (fid, giftcode, "SUCCESS")
                     )
                 elif response_status == "ALREADY_RECEIVED":
                     received_results.append(f"{fid} - {nickname} - ALREADY RECEIVED")
+                    print(f"[INFO] User {fid} ({nickname}) had already received the code {giftcode}.")
                     self.c.execute(
-                        "INSERT INTO user_giftcodes (fid, giftcode, status) VALUES (?, ?, ?) ON CONFLICT(fid, giftcode) DO UPDATE SET status = ?",
-                        (fid, giftcode, "ALREADY_RECEIVED", "ALREADY_RECEIVED")
+                        """
+                        INSERT INTO user_giftcodes (fid, giftcode, status) 
+                        VALUES (?, ?, ?) 
+                        ON CONFLICT(fid, giftcode) 
+                        DO UPDATE SET status = excluded.status
+                        """,
+                        (fid, giftcode, "ALREADY_RECEIVED")
                     )
                 elif response_status == "ERROR":
+                    print(f"[ERROR] Error occurred for user {fid} ({nickname}) when using code {giftcode}.")
                     error_count += 1
                 elif response_status == "CDK_NOT_FOUND":
+                    print(f"[ERROR] Gift code {giftcode} not found for user {fid} ({nickname}). Stopping process.")
                     await notify_message.delete()
                     await interaction.followup.send(
                         embed=discord.Embed(
@@ -174,7 +190,7 @@ class GiftCommand(commands.Cog):
                     return
 
             except Exception as e:
-                print(f"Error processing user {fid}: {str(e)}")
+                print(f"[EXCEPTION] Error processing user {fid} ({nickname}): {str(e)}")
                 error_count += 1
 
         self.conn.commit()
@@ -186,7 +202,11 @@ class GiftCommand(commands.Cog):
                 description=f"The gift code has already been used by everyone.",
                 color=discord.Color.orange()
             )
-            embed.add_field(name="Summary Information", value=f"{len(received_results)} users have already used it.\n{error_count} users encountered an error.", inline=False)
+            embed.add_field(
+                name="Summary Information", 
+                value=f"{len(received_results)} users have already used it.\n{error_count} users encountered an error.", 
+                inline=False
+            )
             await interaction.followup.send(embed=embed)
             return
 
@@ -200,8 +220,6 @@ class GiftCommand(commands.Cog):
             summary_embed.add_field(name="Already Used", value=f"{len(received_results)} users have already used it.", inline=False)
             summary_embed.add_field(name="Error", value=f"{error_count} users encountered an error.", inline=False)
             await interaction.followup.send(embed=summary_embed)
-
-
 
     async def use_giftcode_auto(self, giftcode: str):
         self.c.execute("SELECT * FROM users")
