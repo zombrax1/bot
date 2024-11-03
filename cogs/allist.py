@@ -45,6 +45,8 @@ class Allist(commands.Cog):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
+        await interaction.response.defer(thinking=True)
+
         added = []
         already_exists = []
 
@@ -117,7 +119,7 @@ class Allist(commands.Cog):
                     inline=False
                 )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
         if already_exists:
             embed = discord.Embed(
