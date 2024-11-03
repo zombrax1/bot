@@ -32,6 +32,13 @@ ascii_art = f"""
   \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ 
 """
 
+def install_requirements():
+    try:
+        print("Installing required libraries...")
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
+        print(f"{Fore.GREEN}Libraries installed successfully!{Fore.WHITE}")
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}Failed to install libraries: {e}")
 
 def main_menu():
     while True:
