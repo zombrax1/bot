@@ -45,16 +45,31 @@ class Allist(commands.Cog):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
-        await interaction.response.defer(thinking=True)
+        embed = discord.Embed(
+            title="User Addition in Progress...",
+            description="User addition process is ongoing...",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Successfully Added Users (0)", value="-", inline=False)
+        embed.add_field(name="Users with Errors (0)", value="-", inline=False)
+        embed.add_field(name="Already Existing Users (0)", value="-", inline=False)
 
-        added = []
-        already_exists = []
+        add_message = await interaction.channel.send(embed=embed)
+
+        added_count = 0
+        already_exists_count = 0
+        error_count = 0
+
+        added_users = []
+        already_exists_users = []
+        error_users = []
 
         id_list = ids.split(',')
         for fid in id_list:
             fid = fid.strip()
             if not fid:
-                already_exists.append(f"{fid} - Empty ID provided")
+                error_count += 1
+                error_users.append(fid)
                 continue
 
             current_time = int(time.time() * 1000)
@@ -75,8 +90,9 @@ class Allist(commands.Cog):
                             data = await response.json()
 
                             if not data['data']:
-                                already_exists.append(f"{fid} - No data found")
-                                break 
+                                error_count += 1
+                                error_users.append(fid)
+                                break
 
                             nickname = data['data'][0]['nickname'] if isinstance(data['data'], list) and data['data'] else data['data'].get('nickname', None)
                             furnace_lv = data['data'][0].get('stove_lv', 0) if isinstance(data['data'], list) and data['data'] else data['data'].get('stove_lv', 0)
@@ -88,46 +104,39 @@ class Allist(commands.Cog):
                                 if result is None:
                                     self.c.execute("INSERT INTO users (fid, nickname, furnace_lv) VALUES (?, ?, ?)", (fid, nickname, furnace_lv))
                                     self.conn.commit()
-                                    added.append({'fid': fid, 'nickname': nickname, 'furnace_lv': furnace_lv})
-                                    print(f"Added: {fid} - {nickname}") 
+                                    added_count += 1
+                                    added_users.append(nickname)
                                 else:
-                                    already_exists.append(f"{fid} - Already exists")
+                                    already_exists_count += 1
+                                    already_exists_users.append(nickname)
                             else:
-                                already_exists.append(f"{fid} - Nickname not found")
-                            break 
+                                error_count += 1
+                                error_users.append(fid)
+                            break
 
                         elif response.status == 429:
-                            print(f"Rate limit reached for {fid}. Waiting 1 minute...") 
-                            await asyncio.sleep(60) 
-                            continue 
-
+                            await asyncio.sleep(60)
+                            continue
                         else:
-                            already_exists.append(f"{fid} - Request failed with status: {response.status}")
-                            break  
+                            error_count += 1
+                            error_users.append(fid)
+                            break
 
-        if added:
-            embed = discord.Embed(
-                title="Added People",
-                description="The following users were successfully added:",
-                color=discord.Color.green()
-            )
+            if added_count % 10 == 0:
+                embed.set_field_at(0, name=f"Successfully Added Users ({added_count})", value=", ".join(added_users) or "-", inline=False)
+                embed.set_field_at(1, name=f"Users with Errors ({error_count})", value=", ".join(error_users) or "-", inline=False)
+                embed.set_field_at(2, name=f"Already Existing Users ({already_exists_count})", value=", ".join(already_exists_users) or "-", inline=False)
+                embed.description = "User addition process is ongoing..."
 
-            for user in added:
-                embed.add_field(
-                    name=user['nickname'],
-                    value=f"Furnace Level: {user['furnace_lv']}\nID: {user['fid']}",
-                    inline=False
-                )
+                await add_message.edit(embed=embed)
 
-            await interaction.followup.send(embed=embed)
+        embed.set_field_at(0, name=f"Successfully Added Users ({added_count})", value=", ".join(added_users) or "-", inline=False)
+        embed.set_field_at(1, name=f"Users with Errors ({error_count})", value=", ".join(error_users) or "-", inline=False)
+        embed.set_field_at(2, name=f"Already Existing Users ({already_exists_count})", value=", ".join(already_exists_users) or "-", inline=False)
+        embed.title = "User Addition Completed"
+        embed.description = "User addition process completed."
 
-        if already_exists:
-            embed = discord.Embed(
-                title="Already Exists / No Data Found",
-                description="\n".join(already_exists),
-                color=discord.Color.red()
-            )
-            await interaction.followup.send(embed=embed)
+        await add_message.edit(embed=embed)
 
     @app_commands.command(name="allistremove", description="Remove users by IDs (comma-separated for multiple users)")
     @app_commands.autocomplete(ids=fid_autocomplete)
