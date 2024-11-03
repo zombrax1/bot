@@ -50,7 +50,7 @@ def load_settings():
     default_settings = {
         'BOT_TOKEN': '',
         'SECRET': 'tB87#kPtkxqOS2',
-        'CHANNEL_ID': '',
+        'CHANNEL_ID': '11111',
         'ALLIANCE_NAME': 'RELOISBACK',
         'UPDATE_INTERVAL': '20'
     }
