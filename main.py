@@ -24,6 +24,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS users (fid INTEGER PRIMARY KEY, nickname
 conn.execute('''CREATE TABLE IF NOT EXISTS gift_codes (giftcode TEXT PRIMARY KEY, date TEXT)''')
 conn.execute('''CREATE TABLE IF NOT EXISTS user_giftcodes (fid INTEGER, giftcode TEXT, status TEXT, PRIMARY KEY(fid, giftcode))''')
 c.execute('''CREATE TABLE IF NOT EXISTS custom_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, command_name TEXT NOT NULL, command_access TEXT NOT NULL, delete_message TEXT NOT NULL, action_type TEXT NOT NULL, action_message TEXT, action_gif TEXT, action_fixed_message TEXT)''')
+c.execute('''CREATE TABLE IF NOT EXISTS admin (id INTEGER PRIMARY KEY)''')
 c.execute('''
     CREATE TABLE IF NOT EXISTS nickname_changes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
