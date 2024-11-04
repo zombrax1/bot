@@ -1,22 +1,61 @@
 
 
-# Whiteout Survival Bot
+## Whiteout Survival Discord Bot V2
 
-**24.10.2024 Update Notes;**
+**I shared V1 a short while ago and I decided to improve it and the V2 version of our bot, which is more stable and more stable, with new features, is with you.**
+#####  So what changes have happened?
 
+**/gift**
+First, let's talk about what's new in the gift command
 
- 1. 1.Fixed SSL issue with /allistadd command
- 2. In bulk additions to the list, for example, when 10 people are added to the list, it has been fixed to send a notification message
-    separately for 10 people in the chat. When the addition process is
-    finished in a single 1 embed, it will notify with a single 1
-    message
+The Gift command now shows the current gift codes when you type /gift and checks this periodically on github.
+When there is a new gift command, your bot sends a private message to you and the people you added as admin.
+When you use the gift command in a team of 100 people, it now saves the people who use it in the database.
+In this way, when a new person joins your alliance, when you use the same gift command, if 99 people have used it, it skips 99 of them instantly.
+In this way, we do not tire the API limits and when we want to try the gift command only on the newcomer, we do not need to check the remaining 99 people over and over again.
+The following edit has been made about embed messages: The names of people who successfully use the Gift code will now appear, but people who have already used it or received an error will only be shown with a number
+Thanks to this, we prevented unnecessary visual pollution
 
-![Added People](https://serioyun.com/gif/addedpe.png)
+**/w**
+This command allows you to see the details and pictures of the members you want, we have made updates in this command.
+First of all, it was showing people above level 30, for example a person with FC level 8 as level 70.
+We fixed this and now the FC level image will appear in the embed message according to the FC level.
+When you type the w command, you will be able to see the contacts you saved in the database before sending and find them by typing their names (you can also type id if you want)
+When using the /w command, you will be able to see under the embed message if the contact is registered in the database or not.
+When the API limit is exceeded, you used to get an error when using the /w command, you will no longer get an error, it will make you wait until the API limit is exceeded and show you the result
 
-3. Gift code activated. Here is how to use it;
-/gift giftcode
-This code will use the giftcode that you automatically type to the contacts in your alliance list, showing the successfully used contacts and the previously used contacts separately.
-(Use it when there is no automatic check, the average time to check 100 people is 4-5 minutes, if you use it during automatic check, you may get an error due to API limit exceeding)
+**/addadmin **
+We brought admin authorization to the codes that push API limits, the people you add as admin can only use the gift command, user addition and deletion commands.
+**/nickname - /furnace**
+**Now it saves every change in the database!**
+It was already notifying you about people changing their name and skipping bakery levels, but now it records them.
+When you type /nickname or /furnace it will ask you to enter id or select one of the users stored in the database.
+You will be able to see how many times this person has changed their name and on which dates they used which name.
+The same goes for /furnace (I don't know how useful it is for you :D )
+
+**/allist**
+When you wanted to see the alliance list, in an alliance of 100 people, this list was divided into 4-5 embeds, which turned into visual pollution.
+We tried to make it quite minimal, there are still shifts in the names, this is because we cannot perceive the size of the characters in some different languages)
+
+### I will now leave you with the visuals of the new commands
+**`/allistadd`**
+With this command you will add people to the alliance list, you can add 1 person at a time or 100 people at the same time
+If you type /allistadd ID you will add only 1 person
+You can write more than 1 id by putting a comma next to ID
+/allistadd ID1,ID2,ID3,ID4
+[![](https://github.com/Reloisback/test/blob/main/allistadd.png?raw=true)](https://github.com/Reloisback/test/blob/main/allistadd.png?raw=true)
+
+**`/allist`**
+With this command you can see your current alliance list
+[![](https://github.com/Reloisback/test/blob/main/allist.png?raw=true)](https://github.com/Reloisback/test/blob/main/allist.png?raw=true)
+**`/gift`**
+With this command you can redeem the gift code to anyone you add to your alliance list. All of them will automatically receive the gift in their mail
+[![](https://github.com/Reloisback/test/blob/main/gift1.png?raw=true)](https://github.com/Reloisback/test/blob/main/gift1.png?raw=true)
+[![](https://github.com/Reloisback/test/blob/main/gift2.png?raw=true)](https://github.com/Reloisback/test/blob/main/gift2.png?raw=true)
+[![](https://github.com/Reloisback/test/blob/main/gift3.png?raw=true)](https://github.com/Reloisback/test/blob/main/gift3.png?raw=true)
+**`/nickname - /furnace`**
+This command shows how many times the registered persons changed their name, when they changed it and what they changed it to
+[![](https://github.com/Reloisback/test/blob/main/nicknamefurnace.png?raw=true)](https://github.com/Reloisback/test/blob/main/nicknamefurnace.png?raw=true)
 
 ## Description
 
