@@ -2,7 +2,7 @@
 # Whiteout Survival Discord Bot V2
 
 **I shared V1 a short while ago, and after some improvements, I'm introducing the more stable and feature-rich V2 version of the bot.**
-
+[![How to Install? ](https://github.com/Reloisback/test/blob/main/howinstall.png?raw=true)](https://youtu.be/sWPjBpMhb3s)
 ### What's New?
 
 ### **/gift**
