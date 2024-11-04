@@ -1,76 +1,71 @@
 
+# Whiteout Survival Discord Bot V2
 
-## Whiteout Survival Discord Bot V2
+**I shared V1 a short while ago, and after some improvements, I'm introducing the more stable and feature-rich V2 version of the bot.**
 
-**I shared V1 a short while ago and I decided to improve it and the V2 version of our bot, which is more stable and more stable, with new features, is with you.**
-#####  So what changes have happened?
+### What's New?
 
-**/gift**
-First, let's talk about what's new in the gift command
+### **/gift**
+* The gift command now displays current gift codes when you type `/gift` and checks them periodically on GitHub.
+* When there is a new gift code, the bot sends a private message to you and the people you’ve added as admins.
+* When using this command in a team of 100 people, it records those who have already redeemed it, skipping them for future uses, thus conserving API limits.
+* Embed message updates: Users who redeem the gift code successfully are shown by name, while those who already used it or encountered an error are displayed as a count.
 
-The Gift command now shows the current gift codes when you type /gift and checks this periodically on github.
-When there is a new gift command, your bot sends a private message to you and the people you added as admin.
-When you use the gift command in a team of 100 people, it now saves the people who use it in the database.
-In this way, when a new person joins your alliance, when you use the same gift command, if 99 people have used it, it skips 99 of them instantly.
-In this way, we do not tire the API limits and when we want to try the gift command only on the newcomer, we do not need to check the remaining 99 people over and over again.
-The following edit has been made about embed messages: The names of people who successfully use the Gift code will now appear, but people who have already used it or received an error will only be shown with a number
-Thanks to this, we prevented unnecessary visual pollution
+### **/w**
+* This command, which lets you view the details and images of specified members, has been updated.
+* It now correctly shows the FC level, and the corresponding level image appears in the embed message.
+* When you use `/w`, you can search for users by name or ID and view if they're registered in the database.
+* If the API limit is reached, instead of an error, the bot waits and then displays the result.
 
-**/w**
-This command allows you to see the details and pictures of the members you want, we have made updates in this command.
-First of all, it was showing people above level 30, for example a person with FC level 8 as level 70.
-We fixed this and now the FC level image will appear in the embed message according to the FC level.
-When you type the w command, you will be able to see the contacts you saved in the database before sending and find them by typing their names (you can also type id if you want)
-When using the /w command, you will be able to see under the embed message if the contact is registered in the database or not.
-When the API limit is exceeded, you used to get an error when using the /w command, you will no longer get an error, it will make you wait until the API limit is exceeded and show you the result
+### **/addadmin**
+* Admin authorization has been added to limit API-heavy commands. Only admins can use the gift, add, and remove user commands.
 
-**/addadmin **
-We brought admin authorization to the codes that push API limits, the people you add as admin can only use the gift command, user addition and deletion commands.
-**/nickname - /furnace**
-**Now it saves every change in the database!**
-It was already notifying you about people changing their name and skipping bakery levels, but now it records them.
-When you type /nickname or /furnace it will ask you to enter id or select one of the users stored in the database.
-You will be able to see how many times this person has changed their name and on which dates they used which name.
-The same goes for /furnace (I don't know how useful it is for you :D )
+### **/nickname - /furnace**
+* Every change is now saved in the database. It previously notified you of name changes and furnace level updates, but now also records them.
+* When using `/nickname` or `/furnace`, you can enter an ID or select a user from the database. You’ll see name change history, dates, and previous names.
 
-**/allist**
-When you wanted to see the alliance list, in an alliance of 100 people, this list was divided into 4-5 embeds, which turned into visual pollution.
-We tried to make it quite minimal, there are still shifts in the names, this is because we cannot perceive the size of the characters in some different languages)
+### **/allist**
+* Previously, viewing an alliance list of 100 people would divide it into 4-5 embeds, creating visual clutter. Now it’s more compact and minimal.
 
-### I will now leave you with the visuals of the new commands
-**`/allistadd`**
-With this command you will add people to the alliance list, you can add 1 person at a time or 100 people at the same time
-If you type /allistadd ID you will add only 1 person
-You can write more than 1 id by putting a comma next to ID
-/allistadd ID1,ID2,ID3,ID4
-[![](https://github.com/Reloisback/test/blob/main/allistadd.png?raw=true)](https://github.com/Reloisback/test/blob/main/allistadd.png?raw=true)
+### Visuals of New Commands
 
-**`/allist`**
-With this command you can see your current alliance list
-[![](https://github.com/Reloisback/test/blob/main/allist.png?raw=true)](https://github.com/Reloisback/test/blob/main/allist.png?raw=true)
-**`/gift`**
-With this command you can redeem the gift code to anyone you add to your alliance list. All of them will automatically receive the gift in their mail
-[![](https://github.com/Reloisback/test/blob/main/gift1.png?raw=true)](https://github.com/Reloisback/test/blob/main/gift1.png?raw=true)
-[![](https://github.com/Reloisback/test/blob/main/gift2.png?raw=true)](https://github.com/Reloisback/test/blob/main/gift2.png?raw=true)
-[![](https://github.com/Reloisback/test/blob/main/gift3.png?raw=true)](https://github.com/Reloisback/test/blob/main/gift3.png?raw=true)
-**`/nickname - /furnace`**
-This command shows how many times the registered persons changed their name, when they changed it and what they changed it to
-[![](https://github.com/Reloisback/test/blob/main/nicknamefurnace.png?raw=true)](https://github.com/Reloisback/test/blob/main/nicknamefurnace.png?raw=true)
+#### **`/allistadd`**
+* This command allows you to add people to the alliance list, either one by one or in batches.
+* Use `/allistadd ID` for one person or `/allistadd ID1,ID2,ID3` for multiple entries.
+
+![Allistadd](https://github.com/Reloisback/test/blob/main/allistadd.png?raw=true)
+
+#### **`/allist`**
+* This command shows your current alliance list.
+
+![Allist](https://github.com/Reloisback/test/blob/main/allist.png?raw=true)
+
+#### **`/gift`**
+* Redeem the gift code for alliance members, delivering gifts directly to their mailbox.
+
+![Gift 1](https://github.com/Reloisback/test/blob/main/gift1.png?raw=true)
+![Gift 2](https://github.com/Reloisback/test/blob/main/gift2.png?raw=true)
+![Gift 3](https://github.com/Reloisback/test/blob/main/gift3.png?raw=true)
+
+#### **`/nickname - /furnace`**
+* Shows the number of times a person changed their name and the dates.
+
+![Nickname Furnace](https://github.com/Reloisback/test/blob/main/nicknamefurnace.png?raw=true)
 
 ## Description
 
 This bot is developed for Whiteout Survival players to enhance their Discord channel experience.
-This bot will automatically tell you when members of your Alliance change their Furnace level or change their name in-game.
+The bot notifies you when Alliance members change their furnace level or in-game name.
 
-You can also see their profile photos larger than usual
 ---
 ![Furnace Level Changes](https://serioyun.com/gif/1.png)
 ![User Info](https://serioyun.com/gif/2.png)
 ![Nickname Changes](https://serioyun.com/gif/3.png)
 ![ALLIANCE LIST](https://serioyun.com/gif/4.png)
+
 ## How to Use?
 
-When you first run the bot, don't forget to fill in the `settings.txt` file with:
+Before starting, fill in the `settings.txt` with:
 - `BOT_TOKEN` 
 - `CHANNEL_ID` 
 - `ALLIANCE_NAME`
@@ -79,59 +74,56 @@ When you first run the bot, don't forget to fill in the `settings.txt` file with
 
 ### Discord Commands
 
-#### Add and Remove Members
+#### Adding and Removing Members
 
-- To add a member, use the command:
+- To add a member:
 ```
 /allistadd playerID
 ```
 
-- To add multiple players at once, use:
+- To add multiple players:
 ```
-/allistadd playerID1,PlayerID2,PlayerID3
+/allistadd playerID1,playerID2,playerID3
 ```
-It's recommended to limit to a maximum of 10 additions at a time to avoid temporary bans from the API.
+Recommended limit: 10 additions at a time to avoid temporary API bans.
 
-- To remove a member, use:
+- To remove a member:
 ```
 /allistremove playerID
 ```
 
-- To view the current list of your alliance, use:
+- To view the alliance list:
 ```
 /allist
 ```
 
-- To manually update the alliance list, use:
+- To manually update the list:
 ```
 /updateallist
 ```
 
-- To access detailed information and profile picture of a player, use:
+- For detailed player information and profile pictures:
 ```
 /w playerID
 ```
 
-**Note:** While the bot updates the alliance list, please do not manually refresh it if you are also accessing a player's detailed profile.
+*Note*: Avoid manual refreshes during alliance list updates.
 
-To change the automatic update interval, you can modify the number in line 264 where it says `@tasks.loop(minutes=20)`. Changing it to `60` will set it to 1 hour. The recommended duration is 60 minutes; do not decrease it below 20 minutes, as checking 100 players takes approximately 5-10 minutes.
+To change the auto-update interval, modify the `@tasks.loop(minutes=20)` line to your desired interval.
 
 ---
 
 ## Support Information
 
-Hello, this bot is provided for free by Reloisback on October 18, 2024, for Whiteout Survival users in Discord channels.
-If you are unfamiliar with Python and need assistance, feel free to contact me on Discord by adding Reloisback as a friend. I would be happy to help you.
-If you purchase a Windows server and still need help with the setup for 24/7 bot operation, please reach out to me. I can provide free support and assistance with the installation.
-As I mentioned, this code is completely free, and I do not charge anyone.
+This bot is freely provided by Reloisback for Whiteout Survival users on Discord.
+If you need help, add Reloisback on Discord. For 24/7 setup help on a Windows server, contact me for free support.
 
-However, if you ever wish to support me, here are my coin details:
+To support future projects, consider donating:
 - USDT Tron (TRC20): TC3y2crhRXzoQYhe3rMDNzz6DSrvtonwa3
 - USDT Ethereum (ERC20): 0x60acb1580072f20f008922346a83a7ed8bb7fbc9
 
-I will never forget your support and will continue to develop such projects for free.
-
 Thank you!
+
 
 ---
 
