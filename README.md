@@ -1,4 +1,12 @@
 
+<a href="https://www.buymeacoffee.com/reloisback" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+The current bot project is currently free as you know.
+The current version and all future versions will always be free.
+Updates may be delayed, but at the same time I'm working hard and trying to take care of my family, and I continue to develop the project whenever I can.
+V2 may seem old but we are still sharing updates on discord, now V3.2 is shared on discord and I continue to develop V4 at the same time.
+
+My coffee button is always active if you want to help.
+I love you guys for using my bot and thank you very much for your nice messages
 # Whiteout Survival Discord Bot V2
 
 **I shared V1 a short while ago, and after some improvements, I'm introducing the more stable and feature-rich V2 version of the bot.**
