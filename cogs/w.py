@@ -5,11 +5,14 @@ import hashlib
 import ssl
 import time
 import asyncio
+import sqlite3
+
 class WCommand(commands.Cog):
-    def __init__(self, bot, conn):
+    def __init__(self, bot):
         self.bot = bot
-        self.conn = conn
-        self.c = conn.cursor()
+        self.conn = sqlite3.connect('db/changes.sqlite')
+        self.c = self.conn.cursor()
+        self.SECRET = "tB87#kPtkxqOS2"
         
         self.level_mapping = {
             31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
@@ -25,6 +28,10 @@ class WCommand(commands.Cog):
             80: "FC 10", 81: "FC 10 - 1", 82: "FC 10 - 2", 83: "FC 10 - 3", 84: "FC 10 - 4"
         }
 
+    def cog_unload(self):
+        if hasattr(self, 'conn'):
+            self.conn.close()
+
     @discord.app_commands.command(name='w', description='Fetches user info using fid.')
     async def w(self, interaction: discord.Interaction, fid: str):
         await self.fetch_user_info(interaction, fid)
@@ -32,8 +39,10 @@ class WCommand(commands.Cog):
     @w.autocomplete('fid')
     async def autocomplete_fid(self, interaction: discord.Interaction, current: str):
         try:
-            self.c.execute("SELECT fid, nickname FROM users")
-            users = self.c.fetchall()
+            with sqlite3.connect('db/users.sqlite') as users_db:
+                cursor = users_db.cursor()
+                cursor.execute("SELECT fid, nickname FROM users")
+                users = cursor.fetchall()
 
             choices = [
                 discord.app_commands.Choice(name=f"{nickname} ({fid})", value=str(fid)) 
@@ -48,7 +57,7 @@ class WCommand(commands.Cog):
             return filtered_choices
         
         except Exception as e:
-            print(Fore.GREEN + f"Autocomplete could not be loaded: {e}" + Style.RESET_ALL)
+            print(f"Autocomplete could not be loaded: {e}")
             return []
 
 
@@ -58,7 +67,7 @@ class WCommand(commands.Cog):
             
             current_time = int(time.time() * 1000)
             form = f"fid={fid}&time={current_time}"
-            sign = hashlib.md5((form + self.bot.SECRET).encode('utf-8')).hexdigest()
+            sign = hashlib.md5((form + self.SECRET).encode('utf-8')).hexdigest()
             form = f"sign={sign}&{form}"
 
             url = 'https://wos-giftcode-api.centurygame.com/api/player'
@@ -87,17 +96,40 @@ class WCommand(commands.Cog):
                             else:
                                 stove_level_name = f"Level {stove_level}"
 
-                            self.c.execute("SELECT * FROM users WHERE fid=?", (fid_value,))
-                            result = self.c.fetchone()
-                            footer_text = "Registered on the List ✅" if result else "Not on the List ❌"
+                            user_info = None
+                            alliance_info = None
+                            
+                            with sqlite3.connect('db/users.sqlite') as users_db:
+                                cursor = users_db.cursor()
+                                cursor.execute("SELECT *, alliance FROM users WHERE fid=?", (fid_value,))
+                                user_info = cursor.fetchone()
+                                
+                                if user_info and user_info[-1]:
+                                    with sqlite3.connect('db/alliance.sqlite') as alliance_db:
+                                        cursor = alliance_db.cursor()
+                                        cursor.execute("SELECT name FROM alliance_list WHERE alliance_id=?", (user_info[-1],))
+                                        alliance_info = cursor.fetchone()
 
-                            embed = discord.Embed(title=nickname, color=0x00ff00)
-                            embed.add_field(name='ID', value=fid_value, inline=True)
-                            embed.add_field(name='Furnace Level', value=stove_level_name, inline=True)
-                            embed.add_field(name='State', value=f"{kid}", inline=True)
-                            embed.set_image(url=avatar_image)
-                            embed.set_footer(text=footer_text)
+                            embed = discord.Embed(
+                                title=f"👤 {nickname}",
+                                description=(
+                                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"**🆔 FID:** `{fid_value}`\n"
+                                    f"**🔥 Furnace Level:** `{stove_level_name}`\n"
+                                    f"**🌍 State:** `{kid}`\n"
+                                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                                ),
+                                color=discord.Color.blue()
+                            )
 
+                            if alliance_info:
+                                embed.description += f"**🏰 Alliance:** `{alliance_info[0]}`\n━━━━━━━━━━━━━━━━━━━━━━\n"
+
+                            registration_status = "Registered on the List ✅" if user_info else "Not on the List ❌"
+                            embed.set_footer(text=registration_status)
+
+                            if avatar_image:
+                                embed.set_image(url=avatar_image)
                             if isinstance(stove_lv_content, str) and stove_lv_content.startswith("http"):
                                 embed.set_thumbnail(url=stove_lv_content)
 
@@ -116,4 +148,4 @@ class WCommand(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(WCommand(bot, bot.conn))
+    await bot.add_cog(WCommand(bot))

@@ -1,226 +1,343 @@
 import discord
-from discord.ext import commands, tasks
-import hashlib
-import time
+from discord.ext import commands
 import sqlite3
-import aiohttp
-from wcwidth import wcswidth
-import asyncio
-import ssl
 import os
-from datetime import datetime
-import requests
-from requests.adapters import HTTPAdapter, Retry
 from colorama import Fore, Style, init
+import requests
+import sys
+import asyncio
+import subprocess
+import pkg_resources
+
+def check_and_install_requirements():
+    required_packages = {
+        'discord.py': 'discord.py',
+        'colorama': 'colorama',
+        'requests': 'requests',
+        'aiohttp': 'aiohttp',
+        'python-dotenv': 'python-dotenv',
+        'hashlib': 'hashlib',
+        'typing': 'typing',
+        'datetime': 'datetime',
+        'asyncio': 'asyncio',
+        'ssl': 'ssl'
+    }
+    
+    def install_package(package_name):
+        try:
+            print(f"{Fore.YELLOW}Installing {package_name}...{Style.RESET_ALL}")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"{Fore.GREEN}{package_name} installed successfully.{Style.RESET_ALL}")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"{Fore.RED}Error installing {package_name}.{Style.RESET_ALL}")
+            return False
+
+    installed_packages = {pkg.key for pkg in pkg_resources.working_set}
+    packages_to_install = []
+
+    for package, pip_name in required_packages.items():
+        if package.lower() not in installed_packages:
+            packages_to_install.append(pip_name)
+
+    if packages_to_install:
+        print(f"{Fore.YELLOW}Missing libraries detected. Starting installation...{Style.RESET_ALL}")
+        for package in packages_to_install:
+            success = install_package(package)
+            if not success:
+                print(f"{Fore.RED}Some libraries could not be installed. Please run pip install {package} manually.{Style.RESET_ALL}")
+                sys.exit(1)
+        print(f"{Fore.GREEN}All required libraries installed!{Style.RESET_ALL}")
+        return True
+    return False
+
+VERSION_URL = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/autoupdateinfo.txt"
+
+def restart_bot():
+    print(Fore.YELLOW + "\nRestarting bot..." + Style.RESET_ALL)
+    python = sys.executable
+    os.execl(python, python, *sys.argv)
+
+def setup_version_table():
+    try:
+        with sqlite3.connect('db/settings.sqlite') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''CREATE TABLE IF NOT EXISTS versions (
+                file_name TEXT PRIMARY KEY,
+                version TEXT,
+                is_main INTEGER DEFAULT 0
+            )''')
+            conn.commit()
+            print(Fore.GREEN + "Version table created successfully." + Style.RESET_ALL)
+    except Exception as e:
+        print(Fore.RED + f"Error creating version table: {e}" + Style.RESET_ALL)
+
+async def check_and_update_files():
+    try:
+        response = requests.get(VERSION_URL)
+        if response.status_code != 200:
+            print(Fore.RED + "Failed to fetch version information from GitHub" + Style.RESET_ALL)
+            return False
+
+        if not os.path.exists('cogs'):
+            os.makedirs('cogs')
+            print(Fore.GREEN + "cogs folder created" + Style.RESET_ALL)
+
+        content = response.text.split('\n')
+        documents = {}
+        main_py_updated = False
+
+        doc_section = False
+        for line in content:
+            if line.startswith("Documants;"):
+                doc_section = True
+                continue
+            elif doc_section and line.startswith("Updated Info;"):
+                break
+            elif doc_section and '=' in line:
+                file_name, version = [x.strip() for x in line.split('=')]
+                documents[file_name] = version
+
+        update_notes = []
+        update_section = False
+        for line in content:
+            if line.startswith("Updated Info;"):
+                update_section = True
+                continue
+            if update_section and line.strip():
+                update_notes.append(line.strip())
+
+        updates_needed = []
+        with sqlite3.connect('db/settings.sqlite') as conn:
+            cursor = conn.cursor()
+            
+            for file_name, new_version in documents.items():
+                cursor.execute("SELECT version FROM versions WHERE file_name = ?", (file_name,))
+                current_file_version = cursor.fetchone()
+                
+                if not current_file_version:
+                    updates_needed.append((file_name, new_version))
+                    if file_name == 'main.py':
+                        main_py_updated = True
+                elif current_file_version[0] != new_version:
+                    updates_needed.append((file_name, new_version))
+                    if file_name == 'main.py':
+                        main_py_updated = True
+
+            if updates_needed:
+                print(Fore.YELLOW + "\nUpdates available!" + Style.RESET_ALL)
+                print(Fore.YELLOW + "\nIf this is your first installation and you see File and No version, please update!" + Style.RESET_ALL)
+                print("\nFiles to update:")
+                for file_name, new_version in updates_needed:
+                    cursor.execute("SELECT version FROM versions WHERE file_name = ?", (file_name,))
+                    current = cursor.fetchone()
+                    current_version = current[0] if current else "File and No Version"
+                    print(f"• {file_name}: {current_version} -> {new_version}")
+
+                print("\nUpdate Notes:")
+                for note in update_notes:
+                    print(f"• {note}")
+
+                if main_py_updated:
+                    print(Fore.YELLOW + "\nNOTE: This update includes changes to main.py. Bot will restart after update." + Style.RESET_ALL)
+
+                response = input("\nDo you want to update now? (y/n): ").lower()
+                if response == 'y':
+                    for file_name, new_version in updates_needed:
+                        if file_name.strip() != 'main.py':
+                            file_url = f"https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/{file_name}"
+                            file_response = requests.get(file_url)
+                            
+                            if file_response.status_code == 200:
+                                os.makedirs(os.path.dirname(file_name), exist_ok=True)
+                                content = file_response.text.rstrip('\n')
+                                with open(file_name, 'w', encoding='utf-8', newline='') as f:
+                                    f.write(content)
+                                
+                                cursor.execute("""
+                                    INSERT OR REPLACE INTO versions (file_name, version, is_main)
+                                    VALUES (?, ?, ?)
+                                """, (file_name, new_version, 0))
+
+                    if main_py_updated:
+                        main_file_url = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/main.py"
+                        main_response = requests.get(main_file_url)
+                        
+                        if main_response.status_code == 200:
+                            content = main_response.text.rstrip('\n')
+                            with open('main.py.new', 'w', encoding='utf-8', newline='') as f:
+                                f.write(content)
+                            
+                            cursor.execute("""
+                                INSERT OR REPLACE INTO versions (file_name, version, is_main)
+                                VALUES (?, ?, 1)
+                            """, ('main.py', new_version))
+                            
+                            conn.commit()
+                            print(Fore.GREEN + "\nUpdate completed successfully!" + Style.RESET_ALL)
+                            
+                            if os.path.exists('main.py.bak'):
+                                os.remove('main.py.bak')
+                            os.rename('main.py', 'main.py.bak')
+                            os.rename('main.py.new', 'main.py')
+                            
+                            print(Fore.YELLOW + "\nRestarting bot to apply main.py updates..." + Style.RESET_ALL)
+                            restart_bot()
+                    else:
+                        conn.commit()
+                        print(Fore.GREEN + "\nUpdate completed successfully!" + Style.RESET_ALL)
+                else:
+                    print(Fore.YELLOW + "\nUpdate skipped. Running with existing files." + Style.RESET_ALL)
+
+        return False
+
+    except Exception as e:
+        print(Fore.RED + f"Error during version check: {e}" + Style.RESET_ALL)
+        return False
+
+class CustomBot(commands.Bot):
+    async def on_error(self, event_name, *args, **kwargs):
+        if event_name == "on_interaction":
+            error = sys.exc_info()[1]
+            if isinstance(error, discord.NotFound) and error.code == 10062:
+                return
+            
+        await super().on_error(event_name, *args, **kwargs)
+
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, discord.NotFound) and error.code == 10062:
+            return
+        await super().on_command_error(ctx, error)
+
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix='/', intents=intents)
+bot = CustomBot(command_prefix='/', intents=intents)
 
-conn = sqlite3.connect('gift_db.sqlite')
-print(Fore.GREEN + "Database connection established successfully." + Style.RESET_ALL)
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS users (fid INTEGER PRIMARY KEY, nickname TEXT, furnace_lv INTEGER DEFAULT 0)''')
-conn.execute('''CREATE TABLE IF NOT EXISTS gift_codes (giftcode TEXT PRIMARY KEY, date TEXT)''')
-conn.execute('''CREATE TABLE IF NOT EXISTS user_giftcodes (fid INTEGER, giftcode TEXT, status TEXT, PRIMARY KEY(fid, giftcode))''')
-c.execute('''CREATE TABLE IF NOT EXISTS custom_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, command_name TEXT NOT NULL, command_access TEXT NOT NULL, delete_message TEXT NOT NULL, action_type TEXT NOT NULL, action_message TEXT, action_gif TEXT, action_fixed_message TEXT)''')
-c.execute('''CREATE TABLE IF NOT EXISTS admin (id INTEGER PRIMARY KEY)''')
-c.execute('''
-    CREATE TABLE IF NOT EXISTS nickname_changes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fid INTEGER,
-        old_nickname TEXT,
-        new_nickname TEXT,
-        change_date TEXT
-    )
-''')
+init(autoreset=True)
 
-c.execute('''
-    CREATE TABLE IF NOT EXISTS furnace_changes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fid INTEGER,
-        old_furnace_lv INTEGER,
-        new_furnace_lv INTEGER,
-        change_date TEXT
-    )
-''')
-conn.commit()
-bot.conn = conn
+token_file = 'bot_token.txt'
+if not os.path.exists(token_file):
+    bot_token = input("Enter the bot token: ")
+    with open(token_file, 'w') as f:
+        f.write(bot_token)
+else:
+    with open(token_file, 'r') as f:
+        bot_token = f.read().strip()
 
-level_mapping = {
-    31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
-    35: "FC 1", 36: "FC 1 - 1", 37: "FC 1 - 2", 38: "FC 1 - 3", 39: "FC 1 - 4",
-    40: "FC 2", 41: "FC 2 - 1", 42: "FC 2 - 2", 43: "FC 2 - 3", 44: "FC 2 - 4",
-    45: "FC 3", 46: "FC 3 - 1", 47: "FC 3 - 2", 48: "FC 3 - 3", 49: "FC 3 - 4",
-    50: "FC 4", 51: "FC 4 - 1", 52: "FC 4 - 2", 53: "FC 4 - 3", 54: "FC 4 - 4",
-    55: "FC 5", 56: "FC 5 - 1", 57: "FC 5 - 2", 58: "FC 5 - 3", 59: "FC 5 - 4",
-    60: "FC 6", 61: "FC 6 - 1", 62: "FC 6 - 2", 63: "FC 6 - 3", 64: "FC 6 - 4",
-    65: "FC 7", 66: "FC 7 - 1", 67: "FC 7 - 2", 68: "FC 7 - 3", 69: "FC 7 - 4",
-    70: "FC 8", 71: "FC 8 - 1", 72: "FC 8 - 2", 73: "FC 8 - 3", 74: "FC 8 - 4",
-    75: "FC 9", 76: "FC 9 - 1", 77: "FC 9 - 2", 78: "FC 9 - 3", 79: "FC 9 - 4",
-    80: "FC 10", 81: "FC 10 - 1", 82: "FC 10 - 2", 83: "FC 10 - 3", 84: "FC 10 - 4"
+if not os.path.exists('db'):
+    os.makedirs('db')
+    print(Fore.GREEN + "db folder created" + Style.RESET_ALL)
+
+databases = {
+    "conn_alliance": "db/alliance.sqlite",
+    "conn_giftcode": "db/giftcode.sqlite",
+    "conn_changes": "db/changes.sqlite",
+    "conn_users": "db/users.sqlite",
+    "conn_settings": "db/settings.sqlite",
 }
 
-def load_settings():
-    default_settings = {
-        'BOT_TOKEN': '',
-        'SECRET': 'tB87#kPtkxqOS2',
-        'CHANNEL_ID': '1111',
-        'ALLIANCE_NAME': 'RELOISBACK',
-        'UPDATE_INTERVAL': '20'
-    }
+connections = {name: sqlite3.connect(path) for name, path in databases.items()}
 
-    if not os.path.exists('settings.txt'):
-        with open('settings.txt', 'w') as f:
-            for key, value in default_settings.items():
-                f.write(f"{key}={value}\n")
+print(Fore.GREEN + "Database connections have been successfully established." + Style.RESET_ALL)
 
-        print(Fore.GREEN + "settings.txt file has been created. Please fill in the file and restart the program." + Style.RESET_ALL)
-        exit()
+def create_tables():
+    with connections["conn_changes"] as conn_changes:
+        conn_changes.execute('''CREATE TABLE IF NOT EXISTS nickname_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            fid INTEGER, 
+            old_nickname TEXT, 
+            new_nickname TEXT, 
+            change_date TEXT
+        )''')
+        conn_changes.execute('''CREATE TABLE IF NOT EXISTS furnace_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            fid INTEGER, 
+            old_furnace_lv INTEGER, 
+            new_furnace_lv INTEGER, 
+            change_date TEXT
+        )''')
 
-    settings = {}
-    with open('settings.txt', 'r') as f:
-        for line in f:
-            if '=' in line:
-                key, value = line.strip().split('=', 1)
-                settings[key] = value
+    with connections["conn_settings"] as conn_settings:
+        conn_settings.execute('''CREATE TABLE IF NOT EXISTS botsettings (
+            id INTEGER PRIMARY KEY, 
+            channelid INTEGER, 
+            giftcodestatus TEXT 
+        )''')
+        conn_settings.execute('''CREATE TABLE IF NOT EXISTS admin (
+            id INTEGER PRIMARY KEY, 
+            is_initial INTEGER
+        )''')
 
-    for key in default_settings:
-        if not settings.get(key):
-            print(Fore.GREEN + f"{key} is missing from settings.txt. Please check the file." + Style.RESET_ALL)
-            exit()
+    with connections["conn_users"] as conn_users:
+        conn_users.execute('''CREATE TABLE IF NOT EXISTS users (
+            fid INTEGER PRIMARY KEY, 
+            nickname TEXT, 
+            furnace_lv INTEGER DEFAULT 0, 
+            kid INTEGER, 
+            stove_lv_content TEXT, 
+            alliance TEXT
+        )''')
 
-    settings['UPDATE_INTERVAL'] = int(settings['UPDATE_INTERVAL'])
+    with connections["conn_giftcode"] as conn_giftcode:
+        conn_giftcode.execute('''CREATE TABLE IF NOT EXISTS gift_codes (
+            giftcode TEXT PRIMARY KEY, 
+            date TEXT
+        )''')
+        conn_giftcode.execute('''CREATE TABLE IF NOT EXISTS user_giftcodes (
+            fid INTEGER, 
+            giftcode TEXT, 
+            status TEXT, 
+            PRIMARY KEY (fid, giftcode),
+            FOREIGN KEY (giftcode) REFERENCES gift_codes (giftcode)
+        )''')
 
-    if 'ADMIN' in settings and settings['ADMIN']:
-        settings['ADMIN'] = [int(admin_id.strip()) for admin_id in settings['ADMIN'].split(",")]
-    else:
-        settings['ADMIN'] = []
+    with connections["conn_alliance"] as conn_alliance:
+        conn_alliance.execute('''CREATE TABLE IF NOT EXISTS alliancesettings (
+            alliance_id INTEGER PRIMARY KEY, 
+            channel_id INTEGER, 
+            interval INTEGER
+        )''')
+        conn_alliance.execute('''CREATE TABLE IF NOT EXISTS alliance_list (
+            alliance_id INTEGER PRIMARY KEY, 
+            name TEXT
+        )''')
 
-    return settings
+    print(Fore.GREEN + "All tables checked." + Style.RESET_ALL)
 
-settings = load_settings()
-update_interval = settings['UPDATE_INTERVAL']
-BOT_TOKEN = settings['BOT_TOKEN']
-SECRET = settings['SECRET']
-CHANNEL_ID = int(settings['CHANNEL_ID'])
-ALLIANCE_NAME = settings['ALLIANCE_NAME']
-bot.SECRET = settings['SECRET']
-bot.ALLIANCE_NAME = settings['ALLIANCE_NAME']
+create_tables()
+setup_version_table()  
 
-async def fetch_user_data(fid):
-    url = 'https://wos-giftcode-api.centurygame.com/api/player'
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    current_time = int(time.time() * 1000)
-    form = f"fid={fid}&time={current_time}"
-    sign = hashlib.md5((form + SECRET).encode('utf-8')).hexdigest()
-    form = f"sign={sign}&{form}"
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, data=form, ssl=False) as response:
-            return await response.json() if response.status == 200 else response.status
-
-async def check_agslist(channel):
-    print(Fore.GREEN + "The control started..." + Style.RESET_ALL)
-    c.execute("SELECT fid, nickname, furnace_lv FROM users")
-    users = c.fetchall()
-    
-    furnace_changes, nickname_changes = [], []
-
-    for fid, old_nickname, old_furnace_lv in users:
-        while True:
-            data = await fetch_user_data(fid)
-            if isinstance(data, dict):
-                new_furnace_lv = data['data']['stove_lv']
-                new_nickname = data['data']['nickname'].strip()
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                new_furnace_display = level_mapping.get(new_furnace_lv, new_furnace_lv) if new_furnace_lv >= 30 else new_furnace_lv
-                old_furnace_display = level_mapping.get(old_furnace_lv, old_furnace_lv) if old_furnace_lv >= 30 else old_furnace_lv
-
-                if new_furnace_lv != old_furnace_lv:
-                    c.execute(
-                        "INSERT INTO furnace_changes (fid, old_furnace_lv, new_furnace_lv, change_date) VALUES (?, ?, ?, ?)",
-                        (fid, old_furnace_lv, new_furnace_lv, current_time)
-                    )
-                    conn.commit()
-                    c.execute("UPDATE users SET furnace_lv = ? WHERE fid = ?", (new_furnace_lv, fid))
-                    conn.commit()
-                    furnace_changes.append(f"{old_nickname}: {old_furnace_display} -> {new_furnace_display}")
-
-                if new_nickname.lower() != old_nickname.lower().strip():
-                    c.execute(
-                        "INSERT INTO nickname_changes (fid, old_nickname, new_nickname, change_date) VALUES (?, ?, ?, ?)",
-                        (fid, old_nickname, new_nickname, current_time)
-                    )
-                    conn.commit()
-                    c.execute("UPDATE users SET nickname = ? WHERE fid = ?", (new_nickname, fid))
-                    conn.commit()
-                    nickname_changes.append(f"{old_nickname} -> {new_nickname}")
-
-                break
-            elif data == 429:
-                await asyncio.sleep(60)
-            else:
-                await channel.send(f"Error fetching data for user with ID {fid}. API response: {data}")
-                break
-
-    if furnace_changes:
-        await send_embed(channel, "Furnace Level Changes", "\n".join(furnace_changes), discord.Color.orange())
-    if nickname_changes:
-        await send_embed(channel, "Nickname Changes", "\n".join(nickname_changes), discord.Color.blue())
-    if not (furnace_changes or nickname_changes):
-        print(Fore.GREEN + "No change." + Style.RESET_ALL)
-
-    print(Fore.GREEN + "Control over!" + Style.RESET_ALL)
-
-async def send_embed(channel, title, description, color):
-    embed = discord.Embed(title=title, description=description, color=color)
-    await channel.send(embed=embed)
-
-async def send_embed(channel, title, description, color):
-    embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text="[Reloisback](https://dc.gg/whiteoutall)")
-    await channel.send(embed=embed)
-
-@tasks.loop(minutes=settings['UPDATE_INTERVAL'])
-async def auto_update_agslist():
-    channel = bot.get_channel(CHANNEL_ID)
-    await check_agslist(channel)
+async def load_cogs():
+    await bot.load_extension("cogs.olddb")
+    await bot.load_extension("cogs.control")
+    await bot.load_extension("cogs.alliance")
+    await bot.load_extension("cogs.alliance_member_operations")
+    await bot.load_extension("cogs.bot_operations")
+    await bot.load_extension("cogs.logsystem")
+    await bot.load_extension("cogs.support_operations")
+    await bot.load_extension("cogs.gift_operations")
+    await bot.load_extension("cogs.changes")
+    await bot.load_extension("cogs.w")
+    await bot.load_extension("cogs.wel")
+    await bot.load_extension("cogs.other_features")
 
 @bot.event
 async def on_ready():
-    print(Fore.GREEN + f'Bot is online as {bot.user}' + Style.RESET_ALL)
-    await bot.tree.sync()
-    print(Fore.GREEN + "The bot is ready and commands have been synchronized." + Style.RESET_ALL)
-    channel = bot.get_channel(CHANNEL_ID)
-    await check_agslist(channel)
-    auto_update_agslist.start()
-
-@bot.command(name='updateallist')
-async def update_agslist(ctx):
-    await ctx.message.delete()
-    await check_agslist(ctx.channel)
-
-@tasks.loop(minutes=1)
-async def countdown_timer():
-    next_run_in = auto_update_agslist.next_iteration - discord.utils.utcnow()
-    minutes, seconds = divmod(next_run_in.total_seconds(), 60)
-    print(Fore.GREEN + f"Next update in {int(minutes)} minutes and {int(seconds)} seconds" + Style.RESET_ALL)
+    try:
+        print(f"{Fore.GREEN}Logged in as {Fore.CYAN}{bot.user}{Style.RESET_ALL}")
+        synced = await bot.tree.sync()
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
 
 async def main():
-    settings = load_settings()
-    bot.settings = settings
-    await bot.load_extension("cogs.w")
-    await bot.load_extension("cogs.gift")
-    await bot.load_extension("cogs.addadmin")
-    await bot.load_extension("cogs.allist")
-    await bot.load_extension("cogs.list")
-    await bot.load_extension("cogs.nf")
-    await bot.load_extension("cogs.gncommand")
-    
-
-    await bot.start(BOT_TOKEN)
+    # First check and install required libraries if needed
+    if check_and_install_requirements():
+        print(f"{Fore.GREEN}Library installations completed, starting bot...{Style.RESET_ALL}")
+        
+    await check_and_update_files()
+    await load_cogs()
+    await bot.start(bot_token)
 
 if __name__ == "__main__":
     asyncio.run(main())
