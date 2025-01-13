@@ -8,7 +8,8 @@ def check_and_install_requirements():
         'colorama': 'colorama',
         'requests': 'requests',
         'aiohttp': 'aiohttp',
-        'python-dotenv': 'python-dotenv'
+        'python-dotenv': 'python-dotenv',
+        'aiohttp-socks': 'aiohttp-socks'
     }
     
     def install_package(package_name):
