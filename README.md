@@ -302,17 +302,17 @@ I love this community and thank you all for being part of this journey. ❤️
 
 ## Bot Interface Screenshots
 
-![ScreenShot1](https://i.hizliresim.com/6s8xhwl.png)
-![ScreenShot2](https://i.hizliresim.com/cjeixe0.png)
-![ScreenShot3](https://i.hizliresim.com/ccfh2lp.png)
-![ScreenShot4](https://i.hizliresim.com/6yhvid5.png)
-![ScreenShot5](https://i.hizliresim.com/j93yh97.png)
-![ScreenShot6](https://i.hizliresim.com/2v28mh7.png)
-![ScreenShot7](https://i.hizliresim.com/s9puskm.png)
-![ScreenShot8](https://i.hizliresim.com/5c44be5.png)
-![ScreenShot9](https://i.hizliresim.com/falu8ds.png)
-![ScreenShot10](https://i.hizliresim.com/8sxtu8v.png)
-
+![Screenshot1](pictures/Screenshot_1.png)
+![Screenshot2](pictures/Screenshot_2.png)
+![Screenshot3](pictures/Screenshot_3.png)
+![Screenshot4](pictures/Screenshot_4.png)
+![Screenshot5](pictures/Screenshot_5.png)
+![Screenshot6](pictures/Screenshot_6.png)
+![Screenshot7](pictures/Screenshot_7.png)
+![Screenshot8](pictures/Screenshot_8.png)
+![Screenshot9](pictures/Screenshot_9.png)
+![Screenshot10](pictures/Screenshot_10.png)
+![Screenshot11](pictures/Screenshot_11.png)
 
 ---
 
