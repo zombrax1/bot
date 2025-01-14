@@ -6,7 +6,7 @@ import asyncio
 import requests
 from .alliance_member_operations import AllianceSelectView
 
-VERSION_URL = "https://raw.githubusercontent.com/Reloisback/v4test/refs/heads/main/autoupdateinfo.txt"
+VERSION_URL = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/autoupdateinfo.txt"
 
 class BotOperations(commands.Cog):
     def __init__(self, bot, conn):
