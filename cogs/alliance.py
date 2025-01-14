@@ -467,18 +467,17 @@ class Alliance(commands.Cog):
 
             embed = discord.Embed(
                 title="Channel Selection",
-                description="Please select a channel for the alliance:",
+                description=(
+                    "**Instructions:**\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "Please select a channel for the alliance\n\n"
+                    "**Page:** 1/1\n"
+                    f"**Total Channels:** {len(interaction.guild.text_channels)}"
+                ),
                 color=discord.Color.blue()
             )
 
-            channels = interaction.guild.text_channels
-            channel_options = [discord.SelectOption(label=channel.name, value=str(channel.id)) for channel in channels]
-
-            select = discord.ui.Select(placeholder="Select a channel", options=channel_options)
-            view = discord.ui.View()
-            view.add_item(select)
-
-            async def select_callback(select_interaction: discord.Interaction):
+            async def channel_select_callback(select_interaction: discord.Interaction):
                 try:
                     self.c.execute("SELECT alliance_id FROM alliance_list WHERE name = ?", (alliance_name,))
                     existing_alliance = self.c.fetchone()
@@ -492,7 +491,7 @@ class Alliance(commands.Cog):
                         await select_interaction.response.edit_message(embed=error_embed, view=None)
                         return
 
-                    channel_id = int(select.values[0])
+                    channel_id = int(select_interaction.data["values"][0])
 
                     self.c.execute("INSERT INTO alliance_list (name, discord_server_id) VALUES (?, ?)", 
                                  (alliance_name, interaction.guild.id))
@@ -519,6 +518,7 @@ class Alliance(commands.Cog):
                     result_embed.timestamp = discord.utils.utcnow()
                     
                     await select_interaction.response.edit_message(embed=result_embed, view=None)
+
                 except Exception as e:
                     error_embed = discord.Embed(
                         title="Error",
@@ -527,7 +527,8 @@ class Alliance(commands.Cog):
                     )
                     await select_interaction.response.edit_message(embed=error_embed, view=None)
 
-            select.callback = select_callback
+            channels = interaction.guild.text_channels
+            view = PaginatedChannelView(channels, channel_select_callback)
             await modal.interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
         except ValueError:
@@ -675,34 +676,18 @@ class Alliance(commands.Cog):
                         title="🔄 Channel Selection",
                         description=(
                             "**Current Channel Information**\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━\n"
                             f"📢 Current channel: {f'<#{settings_data[1]}>' if settings_data else 'Not set'}\n"
-                            f"ℹ️ Select a new channel below\n"
+                            "**Page:** 1/1\n"
+                            f"**Total Channels:** {len(interaction.guild.text_channels)}\n"
                             "━━━━━━━━━━━━━━━━━━━━━━"
                         ),
                         color=discord.Color.blue()
                     )
 
-                    channels = interaction.guild.text_channels
-                    channel_options = [
-                        discord.SelectOption(
-                            label=channel.name,
-                            value=str(channel.id),
-                            description="Current channel" if settings_data and channel.id == settings_data[1] else None,
-                            emoji="📢" if settings_data and channel.id == settings_data[1] else "📝"
-                        ) for channel in channels
-                    ]
-
-                    channel_select = discord.ui.Select(
-                        placeholder="Select a new channel",
-                        options=channel_options
-                    )
-                    channel_view = discord.ui.View()
-                    channel_view.add_item(channel_select)
-
                     async def channel_select_callback(channel_interaction: discord.Interaction):
                         try:
-                            channel_id = int(channel_select.values[0])
+                            channel_id = int(channel_interaction.data["values"][0])
 
                             self.c.execute("UPDATE alliance_list SET name = ? WHERE alliance_id = ?", 
                                           (alliance_name, alliance_id))
@@ -739,20 +724,18 @@ class Alliance(commands.Cog):
                             result_embed.timestamp = discord.utils.utcnow()
                             
                             await channel_interaction.response.edit_message(embed=result_embed, view=None)
+
                         except Exception as e:
                             error_embed = discord.Embed(
                                 title="❌ Error",
-                                description=(
-                                    "An error occurred while updating the alliance:\n"
-                                    f"```{str(e)}```"
-                                ),
+                                description=f"An error occurred while updating the alliance: {str(e)}",
                                 color=discord.Color.red()
                             )
-                            error_embed.set_footer(text="Please try again later")
                             await channel_interaction.response.edit_message(embed=error_embed, view=None)
 
-                    channel_select.callback = channel_select_callback
-                    await modal.interaction.response.send_message(embed=embed, view=channel_view, ephemeral=True)
+                    channels = interaction.guild.text_channels
+                    view = PaginatedChannelView(channels, channel_select_callback)
+                    await modal.interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
                 except ValueError:
                     error_embed = discord.Embed(
@@ -1472,6 +1455,82 @@ class PaginatedDeleteView(discord.ui.View):
         )
         embed.set_footer(text="⚠️ Warning: Deleting an alliance will remove all its data!")
         embed.timestamp = discord.utils.utcnow()
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+
+class PaginatedChannelView(discord.ui.View):
+    def __init__(self, channels, original_callback):
+        super().__init__(timeout=300)
+        self.current_page = 0
+        self.channels = channels
+        self.original_callback = original_callback
+        self.items_per_page = 25
+        self.pages = [channels[i:i + self.items_per_page] for i in range(0, len(channels), self.items_per_page)]
+        self.total_pages = len(self.pages)
+        self.update_view()
+
+    def update_view(self):
+        self.clear_items()
+        
+        current_channels = self.pages[self.current_page]
+        channel_options = [
+            discord.SelectOption(
+                label=channel.name[:40],
+                value=str(channel.id),
+                description=f"Channel ID: {channel.id}" if len(channel.name) > 40 else None,
+                emoji="📢"
+            ) for channel in current_channels
+        ]
+        
+        select = discord.ui.Select(
+            placeholder=f"Select channel ({self.current_page + 1}/{self.total_pages})",
+            options=channel_options
+        )
+        select.callback = self.original_callback
+        self.add_item(select)
+        
+        if self.total_pages > 1:
+            previous_button = discord.ui.Button(
+                label="◀️",
+                style=discord.ButtonStyle.grey,
+                custom_id="previous",
+                disabled=(self.current_page == 0)
+            )
+            previous_button.callback = self.previous_callback
+            self.add_item(previous_button)
+
+            next_button = discord.ui.Button(
+                label="▶️",
+                style=discord.ButtonStyle.grey,
+                custom_id="next",
+                disabled=(self.current_page == len(self.pages) - 1)
+            )
+            next_button.callback = self.next_callback
+            self.add_item(next_button)
+
+    async def previous_callback(self, interaction: discord.Interaction):
+        self.current_page = (self.current_page - 1) % len(self.pages)
+        self.update_view()
+        
+        embed = interaction.message.embeds[0]
+        embed.description = (
+            f"**Page:** {self.current_page + 1}/{self.total_pages}\n"
+            f"**Total Channels:** {len(self.channels)}\n\n"
+            "Please select a channel from the menu below."
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def next_callback(self, interaction: discord.Interaction):
+        self.current_page = (self.current_page + 1) % len(self.pages)
+        self.update_view()
+        
+        embed = interaction.message.embeds[0]
+        embed.description = (
+            f"**Page:** {self.current_page + 1}/{self.total_pages}\n"
+            f"**Total Channels:** {len(self.channels)}\n\n"
+            "Please select a channel from the menu below."
+        )
         
         await interaction.response.edit_message(embed=embed, view=self)
 
