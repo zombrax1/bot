@@ -12,6 +12,7 @@ import asyncio
 import re
 from .alliance_member_operations import AllianceSelectView
 from .alliance import PaginatedChannelView
+import os
 
 class GiftOperations(commands.Cog):
     def __init__(self, bot):
@@ -65,6 +66,10 @@ class GiftOperations(commands.Cog):
             )
         """)
         self.conn.commit()
+
+        self.log_directory = 'log'
+        if not os.path.exists(self.log_directory):
+            os.makedirs(self.log_directory)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -1262,6 +1267,7 @@ class GiftOperations(commands.Cog):
             total_members = len(members)
             processed = 0
             success = 0
+            received = 0
             failed = 0
 
             embed = discord.Embed(
@@ -1272,6 +1278,7 @@ class GiftOperations(commands.Cog):
                     f"🎁 **Gift Code:** `{giftcode}`\n"
                     f"👥 **Total Members:** `{total_members}`\n"
                     f"✅ **Success:** `{success}`\n"
+                    f"⚠️ **Already Used:** `{received}`\n"
                     f"❌ **Failed:** `{failed}`\n"
                     f"⏳ **Progress:** `{processed}/{total_members}`\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1280,11 +1287,26 @@ class GiftOperations(commands.Cog):
             )
             status_message = await channel.send(embed=embed)
 
+            log_file_path = os.path.join(self.log_directory, 'giftlog.txt')
+            with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                log_file.write(f"\nGIFT CODE: {giftcode}\n")
+                log_file.write(f"USAGE TIME: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log_file.write("-----------------------------\n")
+                log_file.write("Alliance Member List\n\n")
+
             for member in members:
                 player_id = member[0]
                 try:
+                    with sqlite3.connect('db/users.sqlite') as users_db:
+                        cursor = users_db.cursor()
+                        cursor.execute("SELECT nickname FROM users WHERE fid = ?", (player_id,))
+                        nickname = cursor.fetchone()[0]
+
                     response_status = await self.claim_giftcode_rewards_wos(player_id, giftcode)
                     
+                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                        log_file.write(f"{nickname} - {response_status}\n")
+
                     if response_status == 429:
                         embed.description = (
                             f"**API Rate Limit Detected**\n"
@@ -1292,6 +1314,7 @@ class GiftOperations(commands.Cog):
                             f"🎁 **Gift Code:** `{giftcode}`\n"
                             f"👥 **Total Members:** `{total_members}`\n"
                             f"✅ **Success:** `{success}`\n"
+                            f"⚠️ **Already Used:** `{received}`\n"
                             f"❌ **Failed:** `{failed}`\n"
                             f"⏳ **Progress:** `{processed}/{total_members}`\n"
                             f"⚠️ **Waiting 60 seconds for API cooldown...**\n"
@@ -1305,8 +1328,10 @@ class GiftOperations(commands.Cog):
                         embed.color = discord.Color.blue()
                         continue
 
-                    if response_status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+                    if response_status == "SUCCESS":
                         success += 1
+                    elif response_status in ["RECEIVED", "SAME TYPE EXCHANGE"]:
+                        received += 1
                     else:
                         failed += 1
 
@@ -1318,6 +1343,7 @@ class GiftOperations(commands.Cog):
                         f"🎁 **Gift Code:** `{giftcode}`\n"
                         f"👥 **Total Members:** `{total_members}`\n"
                         f"✅ **Success:** `{success}`\n"
+                        f"⚠️ **Already Used:** `{received}`\n"
                         f"❌ **Failed:** `{failed}`\n"
                         f"⏳ **Progress:** `{processed}/{total_members}`\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1326,9 +1352,14 @@ class GiftOperations(commands.Cog):
 
                 except Exception as e:
                     print(f"Error processing member {player_id}: {str(e)}")
+                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                        log_file.write(f"{nickname} - ERROR: {str(e)}\n")
                     failed += 1
                     processed += 1
                     await status_message.edit(embed=embed)
+
+            with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                log_file.write("-----------------------------\n\n")
 
             embed.title = "🎁 Auto Gift Code Complete"
             embed.color = discord.Color.green()
