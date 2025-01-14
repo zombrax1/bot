@@ -302,34 +302,17 @@ I love this community and thank you all for being part of this journey. ❤️
 
 ## Bot Interface Screenshots
 
-![Main Menu](https://i.hizliresim.com/15ee21d.png)
+![ScreenShot1](https://i.hizliresim.com/6s8xhwl.png)
+![ScreenShot2](https://i.hizliresim.com/cjeixe0.png)
+![ScreenShot3](https://i.hizliresim.com/ccfh2lp.png)
+![ScreenShot4](https://i.hizliresim.com/6yhvid5.png)
+![ScreenShot5](https://i.hizliresim.com/j93yh97.png)
+![ScreenShot6](https://i.hizliresim.com/2v28mh7.png)
+![ScreenShot7](https://i.hizliresim.com/s9puskm.png)
+![ScreenShot8](https://i.hizliresim.com/5c44be5.png)
+![ScreenShot9](https://i.hizliresim.com/falu8ds.png)
+![ScreenShot10](https://i.hizliresim.com/8sxtu8v.png)
 
-
-![Alliance Operations](https://i.hizliresim.com/6s8xhwl.png)
-
-
-![Member Management](https://i.hizliresim.com/cjeixe0.png)
-
-
-![Gift Code System](https://i.hizliresim.com/ccfh2lp.png)
-
-![Progress Tracking](https://i.hizliresim.com/6yhvid5.png)
-
-
-![Member List](https://i.hizliresim.com/j93yh97.png)
-
-![Settings Panel](https://i.hizliresim.com/2v28mh7.png)
-
-![Log System](https://i.hizliresim.com/s9puskm.png)
-
-
-![Support Menu](https://i.hizliresim.com/5c44be5.png)
-
-
-![Developer Info](https://i.hizliresim.com/falu8ds.png)
-
-
-![Status Updates](https://i.hizliresim.com/8sxtu8v.png)
 
 ---
 
