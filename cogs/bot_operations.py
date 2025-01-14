@@ -885,7 +885,7 @@ class BotOperations(commands.Cog):
 
                 database_cog = self.bot.get_cog('DatabaseTransfer')
                 if database_cog:
-                    await database_cog.olddatabase(interaction)
+                    await database_cog.transfer_old_database(interaction)
                 else:
                     await interaction.response.send_message(
                         "❌ Database transfer module not loaded.", 
