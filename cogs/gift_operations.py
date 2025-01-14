@@ -11,6 +11,7 @@ from discord.ext import tasks
 import asyncio
 import re
 from .alliance_member_operations import AllianceSelectView
+from .alliance import PaginatedChannelView
 
 class GiftOperations(commands.Cog):
     def __init__(self, bot):
@@ -555,41 +556,18 @@ class GiftOperations(commands.Cog):
                 channel_embed = discord.Embed(
                     title="📢 Gift Code Channel Setup",
                     description=(
-                        "Please select a channel:\n\n"
-                        "**Channel List**\n"
+                        "**Instructions:**\n"
                         "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "Select a channel from the list below:\n"
+                        "Please select a channel for gift codes\n\n"
+                        "**Page:** 1/1\n"
+                        f"**Total Channels:** {len(select_interaction.guild.text_channels)}"
                     ),
                     color=discord.Color.blue()
                 )
 
-                channels = [
-                    channel for channel in select_interaction.guild.channels 
-                    if isinstance(channel, discord.TextChannel)
-                ]
-
-                if not channels:
-                    await select_interaction.response.send_message(
-                        "❌ No text channels found in the server.", 
-                        ephemeral=True
-                    )
-                    return
-
-                channel_select = discord.ui.Select(
-                    placeholder="Select a channel...",
-                    options=[
-                        discord.SelectOption(
-                            label=f"{channel.name[:50]}",
-                            value=str(channel.id),
-                            description=f"#{channel.name}",
-                            emoji="📝"
-                        ) for channel in channels
-                    ]
-                )
-
-                async def channel_callback(channel_interaction: discord.Interaction):
+                async def channel_select_callback(channel_interaction: discord.Interaction):
                     try:
-                        channel_id = int(channel_select.values[0])
+                        channel_id = int(channel_interaction.data["values"][0])
                         
                         self.cursor.execute("""
                             INSERT OR REPLACE INTO giftcode_channel (alliance_id, channel_id)
@@ -621,10 +599,8 @@ class GiftOperations(commands.Cog):
                             ephemeral=True
                         )
 
-                channel_select.callback = channel_callback
-                
-                channel_view = discord.ui.View()
-                channel_view.add_item(channel_select)
+                channels = select_interaction.guild.text_channels
+                channel_view = PaginatedChannelView(channels, channel_select_callback)
 
                 if not select_interaction.response.is_done():
                     await select_interaction.response.edit_message(
