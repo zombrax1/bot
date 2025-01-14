@@ -5,7 +5,7 @@ cogs/alliance.py = V4.1
 cogs/alliance_member_operations.py = V4.2
 cogs/bot_operations.py = V4.1
 cogs/changes.py = V4.0
-cogs/gift_operations.py = V4.1
+cogs/gift_operations.py = V4.2
 cogs/logsystem.py = V4.1
 cogs/olddb.py = V4.1
 cogs/other_features.py = V4.0
@@ -26,3 +26,4 @@ Updated Info;
 - alliance.py Fixed bug for more than 25 discord channels
 - logsystem.py Fixed bug for more than 25 discord channels
 - alliance_member_operations.py Log system added, Fixed a minor issue in adding members
+- gift_operations.py It will now show users who are already using it and will also log all log details in log/giftlog.txt
