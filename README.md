@@ -1,151 +1,339 @@
 
-<a href="https://www.buymeacoffee.com/reloisback" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
-The current bot project is currently free as you know.
-The current version and all future versions will always be free.
-Updates may be delayed, but at the same time I'm working hard and trying to take care of my family, and I continue to develop the project whenever I can.
-V2 may seem old but we are still sharing updates on discord, now V3.2 is shared on discord and I continue to develop V4 at the same time.
+# V4 UPDATED
 
-My coffee button is always active if you want to help.
-I love you guys for using my bot and thank you very much for your nice messages
-# Whiteout Survival Discord Bot V2
+- Let's talk a little bit about V4
+  - Scroll down to the bottom of the page to read the functions of the Menus
+- First of all, those who will set up a discord bot for the first time can watch the youtube video by clicking [FULL HERE](https://www.youtube.com/watch?v=SwbOOij8wFY)
+  
+  - In version V4 we have 2 codes
+1. Our code is /settings. As soon as you use this in the first installation, you will be set as the main administrator
+2. Our code is /w command, this command is for ID Check
 
-**I shared V1 a short while ago, and after some improvements, I'm introducing the more stable and feature-rich V2 version of the bot.**
-[![How to Install? ](https://github.com/Reloisback/test/blob/main/howinstall.png?raw=true)](https://youtu.be/sWPjBpMhb3s)
-### What's New?
+- In V4, python library installation, updates, etc. everything is automated
+- We even have a system that checks for expired gift codes with hidden checks and deletes them from the database
+- There are many features here that I cannot fully explain
+  
+  ##### REMEMBER USE PYTHON VERSION 3.12.4
+  
+  # About me: 
 
-### **/gift**
-* The gift command now displays current gift codes when you type `/gift` and checks them periodically on GitHub.
-* When there is a new gift code, the bot sends a private message to you and the people you’ve added as admins.
-* When using this command in a team of 100 people, it records those who have already redeemed it, skipping them for future uses, thus conserving API limits.
-* Embed message updates: Users who redeem the gift code successfully are shown by name, while those who already used it or encountered an error are displayed as a count.
+# White of Survival Discord Bot
 
-### **/w**
-* This command, which lets you view the details and images of specified members, has been updated.
-* It now correctly shows the FC level, and the corresponding level image appears in the embed message.
-* When you use `/w`, you can search for users by name or ID and view if they're registered in the database.
-* If the API limit is reached, instead of an error, the bot waits and then displays the result.
+## 👋 Welcome!
+Thank you for using our Discord bot. This bot is designed to help manage your White of Survival alliance efficiently and effectively.
 
-### **/addadmin**
-* Admin authorization has been added to limit API-heavy commands. Only admins can use the gift, add, and remove user commands.
+## 🆘 Support Information
 
-### **/nickname - /furnace**
-* Every change is now saved in the database. It previously notified you of name changes and furnace level updates, but now also records them.
-* When using `/nickname` or `/furnace`, you can enter an ID or select a user from the database. You’ll see name change history, dates, and previous names.
+### Need Help?
+If you're experiencing any issues or need assistance with the bot, we're here to help!
 
-### **/allist**
-* Previously, viewing an alliance list of 100 people would divide it into 4-5 embeds, creating visual clutter. Now it’s more compact and minimal.
+### 📞 Contact Methods
+- **Discord Server:** [Join Our Community](https://discord.gg/h8w6N6my4a)
+- **Developer:** Reloisback
+- **Direct Support:** Feel free to message me on Discord
 
-### Visuals of New Commands
+## 💝 Support the Project
 
-#### **`/allistadd`**
-* This command allows you to add people to the alliance list, either one by one or in batches.
-* Use `/allistadd ID` for one person or `/allistadd ID1,ID2,ID3` for multiple entries.
+### Always Free
+This bot was created and published by Reloisback and will **ALWAYS BE FREE**. We believe in providing quality tools accessible to everyone.
 
-![Allistadd](https://github.com/Reloisback/test/blob/main/allistadd.png?raw=true)
+### ☕ Buy Me a Coffee
+If you'd like to support the development:
+- [Buy Me a Coffee](https://www.buymeacoffee.com/reloisback)
+- Your support helps maintain and improve the bot
 
-#### **`/allist`**
-* This command shows your current alliance list.
+## 🔓 Open Source
+Our bot's source code is 100% open source. We believe in transparency and community-driven development.
 
-![Allist](https://github.com/Reloisback/test/blob/main/allist.png?raw=true)
+## 💌 Final Note
+Thank you for being part of our community! Your support and feedback help make this bot better for everyone.
 
-#### **`/gift`**
-* Redeem the gift code for alliance members, delivering gifts directly to their mailbox.
-
-![Gift 1](https://github.com/Reloisback/test/blob/main/gift1.png?raw=true)
-![Gift 2](https://github.com/Reloisback/test/blob/main/gift2.png?raw=true)
-![Gift 3](https://github.com/Reloisback/test/blob/main/gift3.png?raw=true)
-
-#### **`/nickname - /furnace`**
-* Shows the number of times a person changed their name and the dates.
-
-![Nickname Furnace](https://github.com/Reloisback/test/blob/main/nicknamefurnace.png?raw=true)
-
-## Description
-
-This bot is developed for Whiteout Survival players to enhance their Discord channel experience.
-The bot notifies you when Alliance members change their furnace level or in-game name.
+Feel free to reach out anytime - we're always happy to help!
 
 ---
-![Furnace Level Changes](https://serioyun.com/gif/1.png)
-![User Info](https://serioyun.com/gif/2.png)
-![Nickname Changes](https://serioyun.com/gif/3.png)
-![ALLIANCE LIST](https://serioyun.com/gif/4.png)
+*Made with ❤️ by Reloisback*
 
-## How to Use?
 
-Before starting, fill in the `settings.txt` with:
-- `BOT_TOKEN` 
-- `CHANNEL_ID` 
-- `ALLIANCE_NAME`
+# 👨‍💻 About the Developer
 
-**Do not modify the `SECRET` section!**
+## Personal Introduction
+I'm Umut, a 27-year-old developer specializing in Python and PHP. While I used to be an avid gamer, my responsibilities as a family provider have shifted my priorities, leaving limited time for gaming.
 
-### Discord Commands
+## 🤖 Bot's Journey
+White of Survival bot started as a fun project for my own alliance. Upon realizing there wasn't anything similar available, I decided to develop it further and share it with the community. You're currently experiencing Version 4, following successful releases of V1, V2, and V3.
 
-#### Adding and Removing Members
+The development process has been intense, ranging from 1-2 hours some days to marathon 14-15 hour coding sessions.
 
-- To add a member:
-```
-/allistadd playerID
-```
+## 💭 Why Free?
+I'm often asked why I keep this bot free. The answer is simple: accessibility. If monetized, the user base would shrink from thousands to perhaps just 10-15 users. Having experienced financial constraints myself, I understand the importance of making useful tools available to everyone, regardless of their financial situation.
 
-- To add multiple players:
-```
-/allistadd playerID1,playerID2,playerID3
-```
-Recommended limit: 10 additions at a time to avoid temporary API bans.
+## 🤝 Support & Development
+For those who can and wish to support the project, you can use the [☕ Buy me a coffee](https://www.buymeacoffee.com/reloisback) link. These contributions help cover development costs:
+- Proxy servers
+- Testing environments
+- Server maintenance
+- Development tools
 
-- To remove a member:
-```
-/allistremove playerID
-```
+## 💝 Final Words
+To those unable to provide financial support - thank you for using the bot! Support has never been and will never be mandatory. This project will remain free forever.
 
-- To view the alliance list:
-```
-/allist
-```
-
-- To manually update the list:
-```
-/updateallist
-```
-
-- For detailed player information and profile pictures:
-```
-/w playerID
-```
-
-*Note*: Avoid manual refreshes during alliance list updates.
-
-To change the auto-update interval, modify the `@tasks.loop(minutes=20)` line to your desired interval.
+I love this community and thank you all for being part of this journey. ❤️
 
 ---
 
-## Support Information
+### Quick Links
+- [Discord Server](https://discord.gg/h8w6N6my4a)
+- [Support Page](https://www.buymeacoffee.com/reloisback)
+- Discord: Reloisback
 
-This bot is freely provided by Reloisback for Whiteout Survival users on Discord.
-If you need help, add Reloisback on Discord. For 24/7 setup help on a Windows server, contact me for free support.
+*Made with passion and dedication for the White of Survival community* ❤️
 
-To support future projects, consider donating:
-- USDT Tron (TRC20): TC3y2crhRXzoQYhe3rMDNzz6DSrvtonwa3
-- USDT Ethereum (ERC20): 0x60acb1580072f20f008922346a83a7ed8bb7fbc9
 
-Thank you!
+# WOS Discord Bot V4 Documentation
 
+## Main Menu Buttons
+
+### 🏰 Alliance Operations
+- Add, remove and edit alliances
+- Seeing Existing Alliances
+
+### 👥 Member Operations
+- Add, delete and view alliance members
+- Member transfer from Alliance to Alliance
+
+### ⚙️ Bot Operations
+- Adding, deleting and viewing admins
+- Alliance-specific admin authorization and deletion
+- Transferring old V3 and V2 database information 
+- Checking Bot Updates
+- Log System (The log channel you select to see the members added and deleted by administrators)
+### 📜 Alliance History Menu
+- View nickname and furnace level history of any member or alliance
+### 🆘 Support Operations
+- Help and developer information
+- Direct contact options
+
+### 🔧 Other Features
+- Opens additional features menu
+- Reserved for future updates
+# Button Descriptions
+## 🏰 Alliance Operations Menu
+
+### ➕ Add Alliance
+- Pressing this Button prompts you for 3 pieces of information
+- Alliance name and Interval time (Interval time is how many minutes it will check automatically, if you type 0, there will be no automatic check)
+- It then prompts you to select a channel and shows both the automatically redeemed gift code information and the names and oven levels that change under automatic alliance control.
+
+### 🗑️ Delete Alliance
+- Deletes all information and members of your selected alliance
+
+### ✏️ Edit Alliance
+- Allows you to change the name, control time or control channel of the alliance you added
+
+### 👀 View Alliances
+- Shows your alliance lists, how many members it has and how often it is checked
+
+
+## 👥 Member Operations Menu
+
+### ➕ Add Members
+- Used to add members to your alliance
+- When you press the button, it asks you for 2 pieces of information:
+  - First it asks which alliance you want to add members to
+  - Then you will be asked to enter the IDs of the players in the window that appears, (id1,id2,id3 you can add in bulk)
+  - If members are added, you will be able to see them moment by moment
+- It records the details of the added members here, i.e. their logs: `log/add_memberlog.txt`
+### ➖ Remove Member
+- Press this and it asks you to choose an alliance
+- Then it shows the members of the alliance, you can either delete them all or select 1 member and delete it
+### 📋 View Members
+- When you press it, it asks you to choose an alliance,
+- Then shows the members of the alliance
+
+
+
+## 🤖 Bot Operations Menu
+ > 90% of the buttons in this menu can only be used by the owner of the bot
+
+### ➕ Add Admin
+
+- This feature adds admin to your bot. 
+- After pressing it, it asks you to tag the admin
+    - The administrators you add cannot access all settings.
+    - They can only see and manage alliances in the discord they are in.
+    - They can also see specially authorized alliances
+
+### ➖ Remove Admin
+
+- Press this and it will show you the list of attached admins
+- When you select the administrator, it shows you the details and deletes the administrator if you confirm
+
+### 👥 View Administrators
+
+- Shows your admin list and displays the current authorizations of the admins
+
+### 🔗 Assign Alliance to Admin
+
+- Allows you to assign a custom alliance management to the admins you add
+- This is done in different discord server so that the admins you want can see the other alliances
+
+### ➖ Delete Admin Permissions
+
+- This feature allows you to delete the alliance management that you have specifically assigned to the admins
+
+
+### 🔄 Transfer Old Database
+
+- For those who use V2 or V3, it is made to transfer the old database to the V4 database
+- If you put the V2 or V3 database in the file location where main.py is located and then press this button and select the correct version, your members, your members' changes gift codes will be transferred automatically
+
+### 🔄 Check for Updates
+
+- If you check if there is a new version of the bot
+- It will tell you what has changed, if anything
+
+### 📋 Log System
+
+- This button allows you to select the admin log management channel
+- It will tell you to choose an alliance, and after choosing an alliance, it will tell you to choose the discord channel.
+- Shows the actions of the administrators who add or delete members on that channel
+
+## 🎁 Gift Code Operations
+
+
+### 🎫 Create Gift Code
+
+- This button allows you to add gift code manually
+
+### 📋 List Gift Codes
+
+- This button lists the attached gift codes
+
+### ❌ Delete Gift Code
+
+- This button allows you to delete gift code
+
+### 📢 Gift Code Channel
+
+- This button checks gift code
+- It asks you to choose an alliance and then asks you to choose a discord channel
+- Checks the giftcode written by each user in this discord channel
+- If it is a valid giftcode, it adds it to the database
+- If the alliance's automatic gift code usage option is active, it will be used for the whole alliance
+- You can add the channel of your choice by following the messages of the gift code channel from the WOS discord
+- Automatically detects gift codes here
+
+### 🗑️ Delete Gift Channel
+
+- Deletes the channel that controls the written gift codes
+
+### ⚙️ Auto Gift Settings
+
+- When you press this button it asks you to choose an alliance
+- If the alliance is approved and the alliance has a Gift Code Channel
+- It always uses the successful gift codes it captures there for the approved alliance
+
+### 🎯 Use Gift Code for Alliance
+
+- Prompts you to choose an alliance and a gift code, then redeems the gift code for everyone in that alliance
+
+
+## 📝 Alliance History Menu
+
+### 🔥 Furnace Changes
+
+- Pressing this button opens the alliance list
+- After selecting an alliance, the alliance member list will appear, displaying the history of Furnace Changes of the selected member
+- Or you can enter a number between 1 and 24 hours to see all alliance members who made changes within this interval
+
+### 📝 Nickname Changes
+
+- Pressing this button opens the alliance list
+- After selecting an alliance, the alliance member list will appear, displaying the history of Nickname Changes of the selected member
+- Or you can enter a number between 1 and 24 hours to see all alliance members who made changes within this interval
+
+
+# General Features
+
+
+## Everything in one place
+
+- In the V4 version, Bot has integrated every feature into a single menu
+- More stable and faster
+- More details are included
+- Details are given in the embed message for all your transactions
+
+## Automatic Update System
+
+- We have activated automatic update in version V4
+- User will receive a warning when starting the bot if there is an update
+- Within this warning you will see what has changed
+- If he agrees, these changes will be implemented automatically
+### Real-time Progress Tracking
+- Live updates via embeds
+- Color-coded status indicators:
+  - 🔵 Blue: In Progress
+  - 🟠 Orange: Rate Limited
+  - 🟢 Green: Completed
+  - 🔴 Red: Error
+
+### Error Handling
+- Rate limit detection
+- API error management
+- Database error handling
+- User-friendly error messages
+
+### Logging System
+- Automatic log directory creation
+- Detailed operation logs
+- Timestamp tracking
+- Success/Failure records
+
+### Database Management
+- Multiple SQLite databases:
+  - alliance.sqlite: Alliance data
+  - users.sqlite: Member information
+  - settings.sqlite: Bot configuration
+  - giftcode.sqlite: Gift code records
+
+
+
+# White of Survival Discord Bot - Screenshots
+
+## Bot Interface Screenshots
+
+![Main Menu](https://i.hizliresim.com/15ee21d.png)
+
+
+![Alliance Operations](https://i.hizliresim.com/6s8xhwl.png)
+
+
+![Member Management](https://i.hizliresim.com/cjeixe0.png)
+
+
+![Gift Code System](https://i.hizliresim.com/ccfh2lp.png)
+
+![Progress Tracking](https://i.hizliresim.com/6yhvid5.png)
+
+
+![Member List](https://i.hizliresim.com/j93yh97.png)
+
+![Settings Panel](https://i.hizliresim.com/2v28mh7.png)
+
+![Log System](https://i.hizliresim.com/s9puskm.png)
+
+
+![Support Menu](https://i.hizliresim.com/5c44be5.png)
+
+
+![Developer Info](https://i.hizliresim.com/falu8ds.png)
+
+
+![Status Updates](https://i.hizliresim.com/8sxtu8v.png)
 
 ---
 
-## Yapımcı Bilgisi
 
-Merhaba, bu bot Reloisback tarafından 18.10.2024 tarihinde Whiteout Survival kullanıcılarının Discord kanallarında kullanması için ücretsiz olarak yapılmıştır.
-Eğer Python kullanmayı bilmiyorsanız, Discord üzerinden Reloisback arkadaş olarak ekleyerek bana ulaşabilirsiniz; size yardımcı olmaktan mutluluk duyarım.
-Eğer bir Windows sunucu satın alırsanız ve hala kurmayı bilmiyorsanız ve botun 7/24 çalışmasını istiyorsanız yine benimle iletişime geçebilirsiniz. Sizin için ücretsiz destek sağlayabilirim ve kurulumda yardımcı olabilirim.
-Tekrar söylediğim gibi, bu kodlar tamamen ücretsizdir ve hiç kimseden ücret talep etmiyorum.
 
-Fakat bir gün bana destek olmak isterseniz, işte coin bilgilerim;
-- USDT Tron (TRC20): TC3y2crhRXzoQYhe3rMDNzz6DSrvtonwa3
-- USDT Ethereum (ERC20): 0x60acb1580072f20f008922346a83a7ed8bb7fbc9
 
-Desteklerinizi hiçbir zaman unutmayacağım ve bu tür projeleri ücretsiz bir şekilde geliştirmeye devam edeceğim.
 
-Teşekkürler!
