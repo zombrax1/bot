@@ -1119,9 +1119,11 @@ class AllianceMemberOperations(commands.Cog):
                 log_file.write(f"Total Members to Process: {total_users}\n")
                 log_file.write('-'*50 + '\n')
 
-            for index, fid in enumerate(ids_list, 1):
+            index = 0
+            while index < len(ids_list):
+                fid = ids_list[index]
                 try:
-                    embed.description = f"Processing {total_users} members...\n\n**Progress:** `{index}/{total_users}`"
+                    embed.description = f"Processing {total_users} members...\n\n**Progress:** `{index + 1}/{total_users}`"
                     
                     async with aiohttp.ClientSession() as session:
                         current_time = int(time.time() * 1000)
@@ -1143,7 +1145,7 @@ class AllianceMemberOperations(commands.Cog):
                                 embed.color = discord.Color.orange()
                                 await message.edit(embed=embed)
                                 await asyncio.sleep(60)
-                                embed.description = f"Processing {total_users} members...\n\n**Progress:** `{index}/{total_users}`"
+                                embed.description = f"Processing {total_users} members...\n\n**Progress:** `{index + 1}/{total_users}`"
                                 embed.color = discord.Color.blue()
                                 await message.edit(embed=embed)
                                 continue
@@ -1181,56 +1183,117 @@ class AllianceMemberOperations(commands.Cog):
                                                 log_file.write(f"SUCCESS: Added member {nickname} (FID: {fid})\n")
                                             added_count += 1
                                             added_users.append((fid, nickname))
+                                            
+                                            embed.set_field_at(
+                                                0,
+                                                name=f"✅ Successfully Added ({added_count}/{total_users})",
+                                                value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70 
+                                                else ", ".join([n for _, n in added_users]) or "-",
+                                                inline=False
+                                            )
+                                            await message.edit(embed=embed)
+                                            
                                         except Exception as e:
                                             with open(log_file_path, 'a', encoding='utf-8') as log_file:
                                                 log_file.write(f"ERROR: Database error for FID {fid}: {str(e)}\n")
                                             error_count += 1
                                             error_users.append(fid)
-                                            print(f"Database error for fid {fid}: {e}")
+                                            
+                                            embed.set_field_at(
+                                                1,
+                                                name=f"❌ Failed ({error_count}/{total_users})",
+                                                value="Error list cannot be displayed due to exceeding 70 users" if len(error_users) > 70 
+                                                else ", ".join(error_users) or "-",
+                                                inline=False
+                                            )
+                                            await message.edit(embed=embed)
                                     else:
                                         with open(log_file_path, 'a', encoding='utf-8') as log_file:
                                             log_file.write(f"WARNING: Member already exists - {nickname} (FID: {fid})\n")
                                         already_exists_count += 1
                                         already_exists_users.append((fid, nickname))
+                                        
+                                        embed.set_field_at(
+                                            2,
+                                            name=f"⚠️ Already Exists ({already_exists_count}/{total_users})",
+                                            value="Existing user list cannot be displayed due to exceeding 70 users" if len(already_exists_users) > 70 
+                                            else ", ".join([n for _, n in already_exists_users]) or "-",
+                                            inline=False
+                                        )
+                                        await message.edit(embed=embed)
                                 else:
                                     error_count += 1
                                     error_users.append(fid)
 
-                            else:
-                                error_count += 1
-                                error_users.append(fid)
-
-                    embed.set_field_at(
-                        0, 
-                        name=f"✅ Successfully Added ({added_count}/{total_users})",
-                        value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70 
-                        else ", ".join([nickname for _, nickname in added_users]) or "-",
-                        inline=False
-                    )
-                    
-                    embed.set_field_at(
-                        1, 
-                        name=f"❌ Failed ({error_count}/{total_users})",
-                        value="Error list cannot be displayed due to exceeding 70 users" if len(error_users) > 70 
-                        else ", ".join(error_users) or "-",
-                        inline=False
-                    )
-                    
-                    embed.set_field_at(
-                        2, 
-                        name=f"⚠️ Already Exists ({already_exists_count}/{total_users})",
-                        value="Existing user list cannot be displayed due to exceeding 70 users" if len(already_exists_users) > 70 
-                        else ", ".join([nickname for _, nickname in already_exists_users]) or "-",
-                        inline=False
-                    )
-
-                    await message.edit(embed=embed)
+                    index += 1
 
                 except Exception as e:
-                    print(f"Request error: {e}")
+                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                        log_file.write(f"ERROR: Request failed for FID {fid}: {str(e)}\n")
                     error_count += 1
                     error_users.append(fid)
                     await message.edit(embed=embed)
+                    index += 1
+
+            embed.set_field_at(0, name=f"✅ Successfully Added ({added_count}/{total_users})",
+                value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70 
+                else ", ".join([nickname for _, nickname in added_users]) or "-",
+                inline=False
+            )
+            
+            embed.set_field_at(1, name=f"❌ Failed ({error_count}/{total_users})",
+                value="Error list cannot be displayed due to exceeding 70 users" if len(error_users) > 70 
+                else ", ".join(error_users) or "-",
+                inline=False
+            )
+            
+            embed.set_field_at(2, name=f"⚠️ Already Exists ({already_exists_count}/{total_users})",
+                value="Existing user list cannot be displayed due to exceeding 70 users" if len(already_exists_users) > 70 
+                else ", ".join([nickname for _, nickname in already_exists_users]) or "-",
+                inline=False
+            )
+
+            await message.edit(embed=embed)
+
+            try:
+                with sqlite3.connect('db/settings.sqlite') as settings_db:
+                    cursor = settings_db.cursor()
+                    cursor.execute("""
+                        SELECT channel_id 
+                        FROM alliance_logs 
+                        WHERE alliance_id = ?
+                    """, (alliance_id,))
+                    alliance_log_result = cursor.fetchone()
+                    
+                    if alliance_log_result and alliance_log_result[0]:
+                        log_embed = discord.Embed(
+                            title="👥 Members Added to Alliance",
+                            description=(
+                                f"**Alliance:** {alliance_name}\n"
+                                f"**Administrator:** {interaction.user.name} (`{interaction.user.id}`)\n"
+                                f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                                f"**Results:**\n"
+                                f"✅ Successfully Added: {added_count}\n"
+                                f"❌ Failed: {error_count}\n"
+                                f"⚠️ Already Exists: {already_exists_count}\n\n"
+                                "**Added FIDs:**\n"
+                                f"```\n{','.join(ids_list)}\n```"
+                            ),
+                            color=discord.Color.green()
+                        )
+
+                        try:
+                            alliance_channel_id = int(alliance_log_result[0])
+                            alliance_log_channel = self.bot.get_channel(alliance_channel_id)
+                            if alliance_log_channel:
+                                await alliance_log_channel.send(embed=log_embed)
+                        except Exception as e:
+                            with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                log_file.write(f"ERROR: Alliance Log Sending Error: {str(e)}\n")
+
+            except Exception as e:
+                with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                    log_file.write(f"ERROR: Log record error: {str(e)}\n")
 
             with open(log_file_path, 'a', encoding='utf-8') as log_file:
                 log_file.write(f"\nFinal Results:\n")
