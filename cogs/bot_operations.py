@@ -59,7 +59,87 @@ class BotOperations(commands.Cog):
         if custom_id == "bot_operations":
             return
         
-        if custom_id in ["assign_alliance", "add_admin", "remove_admin", "main_menu", "bot_status", "bot_settings"]:
+        if custom_id == "alliance_control_messages":
+            try:
+                self.settings_cursor.execute("SELECT is_initial FROM admin WHERE id = ?", (interaction.user.id,))
+                result = self.settings_cursor.fetchone()
+                
+                if not result or result[0] != 1:
+                    await interaction.response.send_message(
+                        "❌ Only global administrators can use this command.", 
+                        ephemeral=True
+                    )
+                    return
+
+                self.settings_cursor.execute("SELECT value FROM auto LIMIT 1")
+                result = self.settings_cursor.fetchone()
+                current_value = result[0] if result else 1
+
+                embed = discord.Embed(
+                    title="💬 Alliance Control Messages Settings",
+                    description=f"Alliance Control Information Message is Currently {'On' if current_value == 1 else 'Off'}",
+                    color=discord.Color.green() if current_value == 1 else discord.Color.red()
+                )
+
+                view = discord.ui.View()
+                
+                open_button = discord.ui.Button(
+                    label="Turn On",
+                    emoji="✅",
+                    style=discord.ButtonStyle.success,
+                    custom_id="control_messages_open",
+                    disabled=current_value == 1
+                )
+                
+                close_button = discord.ui.Button(
+                    label="Turn Off",
+                    emoji="❌",
+                    style=discord.ButtonStyle.danger,
+                    custom_id="control_messages_close",
+                    disabled=current_value == 0
+                )
+
+                async def open_callback(button_interaction: discord.Interaction):
+                    self.settings_cursor.execute("UPDATE auto SET value = 1")
+                    self.settings_db.commit()
+                    
+                    embed.description = "Alliance Control Information Message Turned On"
+                    embed.color = discord.Color.green()
+                    
+                    open_button.disabled = True
+                    close_button.disabled = False
+                    
+                    await button_interaction.response.edit_message(embed=embed, view=view)
+
+                async def close_callback(button_interaction: discord.Interaction):
+                    self.settings_cursor.execute("UPDATE auto SET value = 0")
+                    self.settings_db.commit()
+                    
+                    embed.description = "Alliance Control Information Message Turned Off"
+                    embed.color = discord.Color.red()
+                    
+                    open_button.disabled = False
+                    close_button.disabled = True
+                    
+                    await button_interaction.response.edit_message(embed=embed, view=view)
+
+                open_button.callback = open_callback
+                close_button.callback = close_callback
+
+                view.add_item(open_button)
+                view.add_item(close_button)
+
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+            except Exception as e:
+                print(f"Alliance control messages error: {e}")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "❌ An error occurred while managing alliance control messages.",
+                        ephemeral=True
+                    )
+                    
+        elif custom_id in ["assign_alliance", "add_admin", "remove_admin", "main_menu", "bot_status", "bot_settings"]:
             try:
                 if custom_id == "assign_alliance":
                     try:
@@ -1056,6 +1136,13 @@ class BotOperations(commands.Cog):
                 emoji="📋",
                 style=discord.ButtonStyle.primary,
                 custom_id="log_system",
+                row=3
+            ))
+            view.add_item(discord.ui.Button(
+                label="Alliance Control Messages",
+                emoji="💬",
+                style=discord.ButtonStyle.primary,
+                custom_id="alliance_control_messages",
                 row=3
             ))
             view.add_item(discord.ui.Button(
