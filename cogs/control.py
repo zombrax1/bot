@@ -37,6 +37,21 @@ class Control(commands.Cog):
         self.cursor_alliance = self.conn_alliance.cursor()
         self.cursor_users = self.conn_users.cursor()
         self.cursor_changes = self.conn_changes.cursor()
+        
+        self.conn_settings = sqlite3.connect('db/settings.sqlite')
+        self.cursor_settings = self.conn_settings.cursor()
+        self.cursor_settings.execute("""
+            CREATE TABLE IF NOT EXISTS auto (
+                id INTEGER PRIMARY KEY,
+                value INTEGER DEFAULT 1
+            )
+        """)
+        
+        self.cursor_settings.execute("SELECT COUNT(*) FROM auto")
+        if self.cursor_settings.fetchone()[0] == 0:
+            self.cursor_settings.execute("INSERT INTO auto (value) VALUES (1)")
+        self.conn_settings.commit()
+        
         self.db_lock = asyncio.Lock()
         self.proxies = self.load_proxies()
         self.alliance_tasks = {}
@@ -97,6 +112,15 @@ class Control(commands.Cog):
 
         start_time = datetime.now()
         print(f"{Fore.CYAN}{alliance_name} Alliance Control started at {start_time.strftime('%Y-%m-%d %H:%M:%S')}{Style.RESET_ALL}")
+        
+        async with self.db_lock:
+            with sqlite3.connect('db/settings.sqlite') as settings_db:
+                cursor = settings_db.cursor()
+                cursor.execute("SELECT value FROM auto LIMIT 1")
+                result = cursor.fetchone()
+                auto_value = result[0] if result else 1
+        
+        
         embed = discord.Embed(
             title=f"🏰 {alliance_name} Alliance Control",
             description="🔍 Checking for changes in member status...",
@@ -113,7 +137,10 @@ class Control(commands.Cog):
             inline=False
         )
         embed.set_footer(text="⚡ Automatic Alliance Control System")
-        message = await channel.send(embed=embed)
+        
+        message = None
+        if auto_value == 1:
+            message = await channel.send(embed=embed)
 
         furnace_changes, nickname_changes, kid_changes = [], [], []
 
@@ -126,13 +153,15 @@ class Control(commands.Cog):
                 if data == 429 and (not os.path.exists('proxy.txt') or not self.proxies):
                     embed.description = f"⚠️ API Rate Limit! Waiting 60 seconds...\n📊 Progress: {checked_users}/{total_users} members"
                     embed.color = discord.Color.orange()
-                    await message.edit(embed=embed)
+                    if message:
+                        await message.edit(embed=embed)
                     
                     await asyncio.sleep(60)
                     
                     embed.description = "🔍 Checking for changes in member status..."
                     embed.color = discord.Color.blue()
-                    await message.edit(embed=embed)
+                    if message:
+                        await message.edit(embed=embed)
                     data = await self.fetch_user_data(fid)
                 
                 if isinstance(data, dict):
@@ -178,7 +207,8 @@ class Control(commands.Cog):
                     value=f"✨ Members checked: {checked_users}/{total_users}",
                     inline=False
                 )
-                await message.edit(embed=embed)
+                if message:
+                    await message.edit(embed=embed)
 
             i += 20
 
@@ -244,7 +274,8 @@ class Control(commands.Cog):
                 inline=True
             )
 
-        await message.edit(embed=embed)
+        if message:
+            await message.edit(embed=embed)
         print(f"{Fore.GREEN}{alliance_name} Alliance Control completed at {end_time.strftime('%Y-%m-%d %H:%M:%S')}{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{alliance_name} Alliance Total Duration: {duration}{Style.RESET_ALL}")
 
