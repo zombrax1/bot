@@ -152,6 +152,8 @@ if __name__ == "__main__":
 
                     response = input("\nDo you want to update now? (y/n): ").lower()
                     if response == 'y':
+                        needs_restart = False
+                        
                         for file_name, new_version in updates_needed:
                             if file_name.strip() != 'main.py':
                                 file_url = f"https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/{file_name}"
@@ -180,21 +182,20 @@ if __name__ == "__main__":
                                 cursor.execute("""
                                     INSERT OR REPLACE INTO versions (file_name, version, is_main)
                                     VALUES (?, ?, 1)
-                                """, ('main.py', new_version))
+                                """, ('main.py', documents['main.py']))
                                 
-                                conn.commit()
-                                print(Fore.GREEN + "\nUpdate completed successfully!" + Style.RESET_ALL)
-                                
-                                if os.path.exists('main.py.bak'):
-                                    os.remove('main.py.bak')
-                                os.rename('main.py', 'main.py.bak')
-                                os.rename('main.py.new', 'main.py')
-                                
-                                print(Fore.YELLOW + "\nRestarting bot to apply main.py updates..." + Style.RESET_ALL)
-                                restart_bot()
-                        else:
-                            conn.commit()
-                            print(Fore.GREEN + "\nUpdate completed successfully!" + Style.RESET_ALL)
+                                needs_restart = True
+
+                        conn.commit()
+                        print(Fore.GREEN + "\nAll updates completed successfully!" + Style.RESET_ALL)
+
+                        if needs_restart:
+                            if os.path.exists('main.py.bak'):
+                                os.remove('main.py.bak')
+                            os.rename('main.py', 'main.py.bak')
+                            os.rename('main.py.new', 'main.py')
+                            print(Fore.YELLOW + "\nRestarting bot to apply main.py updates..." + Style.RESET_ALL)
+                            restart_bot()
                     else:
                         print(Fore.YELLOW + "\nUpdate skipped. Running with existing files." + Style.RESET_ALL)
 
