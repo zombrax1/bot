@@ -26,6 +26,10 @@ class GNCommands(commands.Cog):
                 admin_user = await self.bot.fetch_user(admin_id)
                 
                 if admin_user:
+                    cursor.execute("SELECT value FROM auto LIMIT 1")
+                    auto_result = cursor.fetchone()
+                    auto_value = auto_result[0] if auto_result else 1
+                    
                     status_embed = discord.Embed(
                         title="🤖 Bot Successfully Activated",
                         description=(
@@ -34,6 +38,7 @@ class GNCommands(commands.Cog):
                             "✅ Bot is now online and operational\n"
                             "✅ Database connections established\n"
                             "✅ Command systems initialized\n"
+                            f"{'✅' if auto_value == 1 else '❌'} Alliance Control Messages\n"
                             "━━━━━━━━━━━━━━━━━━━━━━\n"
                         ),
                         color=discord.Color.green()
