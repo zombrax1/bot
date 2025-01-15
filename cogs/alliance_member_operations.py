@@ -9,6 +9,7 @@ import asyncio
 from typing import List
 from datetime import datetime
 import os
+import ssl
 
 SECRET = 'tB87#kPtkxqOS2'
 
@@ -1132,98 +1133,104 @@ class AllianceMemberOperations(commands.Cog):
                         form = f"sign={sign}&{form}"
                         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
-                        async with session.post('https://wos-giftcode-api.centurygame.com/api/player', headers=headers, data=form) as response:
-                            with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                log_file.write(f"\nAPI Response for FID {fid}:\n")
-                                log_file.write(f"Status Code: {response.status}\n")
-                            
-                            if response.status == 429:
-                                with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                    log_file.write("Rate Limit exceeded - Waiting 60 seconds\n")
-                                
-                                embed.description = "⚠️ API rate limit reached. Waiting for 60 seconds..."
-                                embed.color = discord.Color.orange()
-                                await message.edit(embed=embed)
-                                await asyncio.sleep(60)
-                                embed.description = f"Processing {total_users} members...\n\n**Progress:** `{index + 1}/{total_users}`"
-                                embed.color = discord.Color.blue()
-                                await message.edit(embed=embed)
-                                continue
+                        ssl_context = ssl.create_default_context()
+                        ssl_context.check_hostname = False
+                        ssl_context.verify_mode = ssl.CERT_NONE
 
-                            if response.status == 200:
-                                data = await response.json()
+                        connector = aiohttp.TCPConnector(ssl=ssl_context)
+                        async with aiohttp.ClientSession(connector=connector) as session:
+                            async with session.post('https://wos-giftcode-api.centurygame.com/api/player', headers=headers, data=form) as response:
                                 with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                    log_file.write(f"API Response Data: {str(data)}\n")
+                                    log_file.write(f"\nAPI Response for FID {fid}:\n")
+                                    log_file.write(f"Status Code: {response.status}\n")
                                 
-                                if not data.get('data'):
+                                if response.status == 429:
                                     with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                        log_file.write(f"ERROR: No data found for FID {fid}\n")
-                                    error_count += 1
-                                    error_users.append(fid)
-                                    print("No data found for fid:", fid)
+                                        log_file.write("Rate Limit exceeded - Waiting 60 seconds\n")
+                                    
+                                    embed.description = "⚠️ API rate limit reached. Waiting for 60 seconds..."
+                                    embed.color = discord.Color.orange()
+                                    await message.edit(embed=embed)
+                                    await asyncio.sleep(60)
+                                    embed.description = f"Processing {total_users} members...\n\n**Progress:** `{index + 1}/{total_users}`"
+                                    embed.color = discord.Color.blue()
+                                    await message.edit(embed=embed)
                                     continue
 
-                                nickname = data['data'].get('nickname')
-                                furnace_lv = data['data'].get('stove_lv', 0)
-                                stove_lv_content = data['data'].get('stove_lv_content', None)
-                                kid = data['data'].get('kid', None)
+                                if response.status == 200:
+                                    data = await response.json()
+                                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                        log_file.write(f"API Response Data: {str(data)}\n")
+                                    
+                                    if not data.get('data'):
+                                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                            log_file.write(f"ERROR: No data found for FID {fid}\n")
+                                        error_count += 1
+                                        error_users.append(fid)
+                                        print("No data found for fid:", fid)
+                                        continue
 
-                                if nickname:
-                                    self.c_users.execute("SELECT * FROM users WHERE fid=?", (fid,))
-                                    result = self.c_users.fetchone()
+                                    nickname = data['data'].get('nickname')
+                                    furnace_lv = data['data'].get('stove_lv', 0)
+                                    stove_lv_content = data['data'].get('stove_lv_content', None)
+                                    kid = data['data'].get('kid', None)
 
-                                    if result is None:
-                                        try:
-                                            self.c_users.execute("""
-                                                INSERT INTO users (fid, nickname, furnace_lv, kid, stove_lv_content, alliance)
-                                                VALUES (?, ?, ?, ?, ?, ?)
-                                            """, (fid, nickname, furnace_lv, kid, stove_lv_content, alliance_id))
-                                            self.conn_users.commit()
+                                    if nickname:
+                                        self.c_users.execute("SELECT * FROM users WHERE fid=?", (fid,))
+                                        result = self.c_users.fetchone()
+
+                                        if result is None:
+                                            try:
+                                                self.c_users.execute("""
+                                                    INSERT INTO users (fid, nickname, furnace_lv, kid, stove_lv_content, alliance)
+                                                    VALUES (?, ?, ?, ?, ?, ?)
+                                                """, (fid, nickname, furnace_lv, kid, stove_lv_content, alliance_id))
+                                                self.conn_users.commit()
+                                                with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                                    log_file.write(f"SUCCESS: Added member {nickname} (FID: {fid})\n")
+                                                added_count += 1
+                                                added_users.append((fid, nickname))
+                                                
+                                                embed.set_field_at(
+                                                    0,
+                                                    name=f"✅ Successfully Added ({added_count}/{total_users})",
+                                                    value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70 
+                                                    else ", ".join([n for _, n in added_users]) or "-",
+                                                    inline=False
+                                                )
+                                                await message.edit(embed=embed)
+                                                
+                                            except Exception as e:
+                                                with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                                    log_file.write(f"ERROR: Database error for FID {fid}: {str(e)}\n")
+                                                error_count += 1
+                                                error_users.append(fid)
+                                                
+                                                embed.set_field_at(
+                                                    1,
+                                                    name=f"❌ Failed ({error_count}/{total_users})",
+                                                    value="Error list cannot be displayed due to exceeding 70 users" if len(error_users) > 70 
+                                                    else ", ".join(error_users) or "-",
+                                                    inline=False
+                                                )
+                                                await message.edit(embed=embed)
+                                        else:
                                             with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                                log_file.write(f"SUCCESS: Added member {nickname} (FID: {fid})\n")
-                                            added_count += 1
-                                            added_users.append((fid, nickname))
+                                                log_file.write(f"WARNING: Member already exists - {nickname} (FID: {fid})\n")
+                                            already_exists_count += 1
+                                            already_exists_users.append((fid, nickname))
                                             
                                             embed.set_field_at(
-                                                0,
-                                                name=f"✅ Successfully Added ({added_count}/{total_users})",
-                                                value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70 
-                                                else ", ".join([n for _, n in added_users]) or "-",
-                                                inline=False
-                                            )
-                                            await message.edit(embed=embed)
-                                            
-                                        except Exception as e:
-                                            with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                                log_file.write(f"ERROR: Database error for FID {fid}: {str(e)}\n")
-                                            error_count += 1
-                                            error_users.append(fid)
-                                            
-                                            embed.set_field_at(
-                                                1,
-                                                name=f"❌ Failed ({error_count}/{total_users})",
-                                                value="Error list cannot be displayed due to exceeding 70 users" if len(error_users) > 70 
-                                                else ", ".join(error_users) or "-",
+                                                2,
+                                                name=f"⚠️ Already Exists ({already_exists_count}/{total_users})",
+                                                value="Existing user list cannot be displayed due to exceeding 70 users" if len(already_exists_users) > 70 
+                                                else ", ".join([n for _, n in already_exists_users]) or "-",
                                                 inline=False
                                             )
                                             await message.edit(embed=embed)
                                     else:
-                                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                            log_file.write(f"WARNING: Member already exists - {nickname} (FID: {fid})\n")
-                                        already_exists_count += 1
-                                        already_exists_users.append((fid, nickname))
-                                        
-                                        embed.set_field_at(
-                                            2,
-                                            name=f"⚠️ Already Exists ({already_exists_count}/{total_users})",
-                                            value="Existing user list cannot be displayed due to exceeding 70 users" if len(already_exists_users) > 70 
-                                            else ", ".join([n for _, n in already_exists_users]) or "-",
-                                            inline=False
-                                        )
-                                        await message.edit(embed=embed)
-                                else:
-                                    error_count += 1
-                                    error_users.append(fid)
+                                        error_count += 1
+                                        error_users.append(fid)
 
                     index += 1
 
