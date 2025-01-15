@@ -165,6 +165,8 @@ class GiftOperations(commands.Cog):
                     status = "SAME TYPE EXCHANGE"
                 elif response_json.get("msg") == "TIMEOUT RETRY." and response_json.get("err_code") == 40004:
                     status = "TIMEOUT_RETRY"
+                elif response_json.get("msg") == "USED." and response_json.get("err_code") == 40005:
+                    status = "USAGE_LIMIT"
                 else:
                     status = "ERROR"
 
@@ -236,7 +238,6 @@ class GiftOperations(commands.Cog):
                     if has_bot_reaction:
                         continue
 
-
                     giftcode = None
                     
                     if len(content.split()) == 1:
@@ -255,6 +256,24 @@ class GiftOperations(commands.Cog):
                         
                         if response_stove_info.json().get("msg") == "success":
                             response_status = await self.claim_giftcode_rewards_wos("244886619", giftcode)
+
+                            if response_status == "USAGE_LIMIT":
+                                description = (
+                                    f"**Gift Code Details**\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"👤 **Sender:** {message.author.mention}\n"
+                                    f"🎁 **Gift Code:** `{giftcode}`\n"
+                                    f"❌ **Status:** Usage limit has been reached for this code\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                                )
+                                usage_limit_embed = discord.Embed(
+                                    title="❌ Gift Code Usage Limit",
+                                    description=description,
+                                    color=discord.Color.red()
+                                )
+                                await message.add_reaction("❌")
+                                await message.reply(embed=usage_limit_embed, mention_author=False)
+                                continue
 
                             if response_status == "TIME_ERROR":
                                 description = (
@@ -381,19 +400,19 @@ class GiftOperations(commands.Cog):
                 giftcode = code[0]
                 status = await self.claim_giftcode_rewards_wos("244886619", giftcode)
                 
-                if status in ["TIME_ERROR", "CDK_NOT_FOUND"]:
+                if status in ["TIME_ERROR", "CDK_NOT_FOUND", "USAGE_LIMIT"]:
                     self.cursor.execute("DELETE FROM user_giftcodes WHERE giftcode = ?", (giftcode,))
                     self.cursor.execute("DELETE FROM gift_codes WHERE giftcode = ?", (giftcode,))
                     self.conn.commit()
                     
-                    reason = "expired" if status == "TIME_ERROR" else "invalid"
+                    reason = "expired" if status == "TIME_ERROR" else "invalid" if status == "CDK_NOT_FOUND" else "usage limit reached"
                     admin_embed = discord.Embed(
                         title="🎁 Gift Code Removed",
                         description=(
                             f"**Gift Code Details**\n"
                             f"━━━━━━━━━━━━━━━━━━━━━━\n"
                             f"🎁 **Gift Code:** `{giftcode}`\n"
-                            f"❌ **Reason:** `Code was {reason}`\n"
+                            f"❌ **Reason:** `Code {reason}`\n"
                             f"⏰ **Time:** <t:{int(datetime.now().timestamp())}:R>\n"
                             f"━━━━━━━━━━━━━━━━━━━━━━\n"
                         ),
@@ -1252,6 +1271,22 @@ class GiftOperations(commands.Cog):
             channel_id = channel_id[0]
             channel = self.bot.get_channel(channel_id)
             if not channel:
+                return
+
+            initial_check = await self.claim_giftcode_rewards_wos("244886619", giftcode)
+            if initial_check == "USAGE_LIMIT":
+                usage_limit_embed = discord.Embed(
+                    title="❌ Gift Code Usage Limit Reached",
+                    description=(
+                        f"**Gift Code Details**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🎁 **Gift Code:** `{giftcode}`\n"
+                        f"❌ **Status:** Usage limit has been reached for this code\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ),
+                    color=discord.Color.red()
+                )
+                await channel.send(embed=usage_limit_embed)
                 return
 
             users_conn = sqlite3.connect('db/users.sqlite')
