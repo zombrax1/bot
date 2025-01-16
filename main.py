@@ -331,6 +331,7 @@ if __name__ == "__main__":
         await bot.load_extension("cogs.w")
         await bot.load_extension("cogs.wel")
         await bot.load_extension("cogs.other_features")
+        await bot.load_extension("cogs.bear_trap")
 
     @bot.event
     async def on_ready():
