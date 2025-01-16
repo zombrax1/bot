@@ -12,7 +12,8 @@ def check_and_install_requirements():
         'requests': 'requests',
         'aiohttp': 'aiohttp',
         'python-dotenv': 'python-dotenv',
-        'aiohttp-socks': 'aiohttp-socks'
+        'aiohttp-socks': 'aiohttp-socks',
+        'pytz': 'pytz'
     }
     
     def install_package(package_name):
