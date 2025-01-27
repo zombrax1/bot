@@ -122,7 +122,11 @@ class DatabaseTransfer(commands.Cog):
                 elif table == "user_giftcodes":
                     destination_cursor.executemany("INSERT OR REPLACE INTO user_giftcodes (fid, giftcode, status) VALUES (?, ?, ?)", rows)
                 elif table == "users":
-                    destination_cursor.executemany("INSERT OR REPLACE INTO users (fid, nickname, furnace_lv, kid, stove_lv_content, alliance) VALUES (?, ?, ?, ?, ?, ?)", rows)
+                    reorganized_rows = []
+                    for row in rows:
+                        reorganized_row = (row[0], row[1], row[2], row[4], row[5], row[3])
+                        reorganized_rows.append(reorganized_row)
+                    destination_cursor.executemany("INSERT OR REPLACE INTO users (fid, nickname, furnace_lv, kid, stove_lv_content, alliance) VALUES (?, ?, ?, ?, ?, ?)", reorganized_rows)
 
                 embed.add_field(name=f"Step {table}", value=f"Transferred {row_count} rows ✔", inline=False)
                 await message.edit(embed=embed)
