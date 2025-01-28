@@ -1329,6 +1329,30 @@ class GiftOperations(commands.Cog):
                 log_file.write("-----------------------------\n")
                 log_file.write("Alliance Member List\n\n")
 
+            member_ids = [member[0] for member in members]
+            placeholders = ','.join('?' * len(member_ids))
+            self.cursor.execute(f"""
+                SELECT fid, status FROM user_giftcodes 
+                WHERE giftcode = ? AND fid IN ({placeholders})
+            """, (giftcode, *member_ids))
+            previous_users = {row[0]: row[1] for row in self.cursor.fetchall()}
+
+            received = len(previous_users)
+            processed = received
+            
+            embed.description = (
+                f"**Processing Gift Code**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎁 **Gift Code:** `{giftcode}`\n"
+                f"👥 **Total Members:** `{total_members}`\n"
+                f"✅ **Success:** `{success}`\n"
+                f"⚠️ **Already Used:** `{received}`\n"
+                f"❌ **Failed:** `{failed}`\n"
+                f"⏳ **Progress:** `{processed}/{total_members}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+            await status_message.edit(embed=embed)
+
             for member in members:
                 player_id = member[0]
                 try:
@@ -1336,6 +1360,11 @@ class GiftOperations(commands.Cog):
                         cursor = users_db.cursor()
                         cursor.execute("SELECT nickname FROM users WHERE fid = ?", (player_id,))
                         nickname = cursor.fetchone()[0]
+
+                    if player_id in previous_users:
+                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                            log_file.write(f"{nickname} - PREVIOUSLY_USED ({previous_users[player_id]})\n")
+                        continue
 
                     response_status = await self.claim_giftcode_rewards_wos(player_id, giftcode)
                     
@@ -1363,14 +1392,14 @@ class GiftOperations(commands.Cog):
                         embed.color = discord.Color.blue()
                         continue
 
+                    processed += 1
+
                     if response_status == "SUCCESS":
                         success += 1
                     elif response_status in ["RECEIVED", "SAME TYPE EXCHANGE"]:
                         received += 1
                     else:
                         failed += 1
-
-                    processed += 1
 
                     embed.description = (
                         f"**Processing Gift Code**\n"
