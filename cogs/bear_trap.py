@@ -45,6 +45,28 @@ class BearTrap(commands.Cog):
                 FOREIGN KEY (notification_id) REFERENCES bear_notifications(id) ON DELETE CASCADE
             )
         """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS bear_notification_embeds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                notification_id INTEGER NOT NULL,
+                title TEXT,
+                description TEXT,
+                color INTEGER,
+                image_url TEXT,
+                thumbnail_url TEXT,
+                footer TEXT,
+                author TEXT,
+                mention_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (notification_id) REFERENCES bear_notifications(id) ON DELETE CASCADE
+            )
+        """)
+
+        try:
+            self.cursor.execute("SELECT mention_message FROM bear_notification_embeds LIMIT 1")
+        except sqlite3.OperationalError:
+            self.cursor.execute("ALTER TABLE bear_notification_embeds ADD COLUMN mention_message TEXT")
         
         self.conn.commit()
 
@@ -62,6 +84,20 @@ class BearTrap(commands.Cog):
                               created_by: int, notification_type: int, mention_type: str,
                               repeat_48h: bool, repeat_minutes: int = 0) -> int:
         try:
+            embed_data = None
+            notification_description = description
+
+            if description.startswith("CUSTOM_TIMES:"):
+                parts = description.split("|", 1)
+                notification_description = description
+                
+                if len(parts) > 1 and "EMBED_MESSAGE:" in parts[1]:
+                    if hasattr(self, 'current_embed_data'):
+                        embed_data = self.current_embed_data
+            elif "EMBED_MESSAGE:" in description:
+                notification_description = "EMBED_MESSAGE:true"
+                if hasattr(self, 'current_embed_data'):
+                    embed_data = self.current_embed_data
 
             tz = pytz.timezone(timezone)
             next_notification = start_date.replace(
@@ -77,14 +113,68 @@ class BearTrap(commands.Cog):
                 (guild_id, channel_id, hour, minute, timezone, description, notification_type,
                 mention_type, repeat_enabled, repeat_minutes, created_by, next_notification)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (guild_id, channel_id, hour, minute, timezone, description, notification_type,
-                mention_type, 1 if repeat_48h else 0, repeat_minutes, created_by,
-                next_notification.isoformat()))
+            """, (guild_id, channel_id, hour, minute, timezone, notification_description, notification_type,
+                  mention_type, 1 if repeat_48h else 0, repeat_minutes, created_by,
+                  next_notification.isoformat()))
+            
+            notification_id = self.cursor.lastrowid
+
+            if embed_data:
+                await self.save_notification_embed(notification_id, embed_data)
+
             self.conn.commit()
-            return self.cursor.lastrowid
+            return notification_id
         except Exception as e:
             print(f"Error saving notification: {e}")
             raise
+
+    async def save_notification_embed(self, notification_id: int, embed_data: dict) -> bool:
+        try:
+            self.cursor.execute("""
+                INSERT INTO bear_notification_embeds 
+                (notification_id, title, description, color, image_url, thumbnail_url, footer, author, mention_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                notification_id,
+                embed_data.get('title'),
+                embed_data.get('description'),
+                int(embed_data.get('color', discord.Color.blue().value)),
+                embed_data.get('image_url'),
+                embed_data.get('thumbnail_url'),
+                embed_data.get('footer'),
+                embed_data.get('author'),
+                embed_data.get('mention_message')
+            ))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error saving embed: {e}")
+            return False
+
+    async def get_notification_embed(self, notification_id: int) -> dict:
+        try:
+            self.cursor.execute("""
+                SELECT title, description, color, image_url, thumbnail_url, footer, author, mention_message
+                FROM bear_notification_embeds 
+                WHERE notification_id = ?
+            """, (notification_id,))
+            
+            result = self.cursor.fetchone()
+            if result:
+                return {
+                    'title': result[0],
+                    'description': result[1],
+                    'color': result[2],
+                    'image_url': result[3],
+                    'thumbnail_url': result[4],
+                    'footer': result[5],
+                    'author': result[6],
+                    'mention_message': result[7]
+                }
+            return None
+        except Exception as e:
+            print(f"Error getting embed: {e}")
+            return None
 
     async def check_notifications(self):
         await self.bot.wait_until_ready()
@@ -122,7 +212,12 @@ class BearTrap(commands.Cog):
 
             channel = self.bot.get_channel(channel_id)
             if not channel:
-                print(f"Channel {channel_id} not found")
+                self.cursor.execute("""
+                    UPDATE bear_notifications 
+                    SET is_enabled = 0 
+                    WHERE id = ?
+                """, (id,))
+                self.conn.commit()
                 return
 
             tz = pytz.timezone(timezone)
@@ -172,7 +267,6 @@ class BearTrap(commands.Cog):
             for notify_time in notification_times:
                 time_diff = abs(minutes_until - notify_time)
                 if time_diff < 0.1:  
-
                     thirty_seconds_ago = (now - timedelta(seconds=30)).strftime('%Y-%m-%d %H:%M:%S')
                     
                     self.cursor.execute("""
@@ -208,10 +302,133 @@ class BearTrap(commands.Cog):
                         mention_text = f"Member {member_id}"
 
                 rounded_time = round(minutes_until)
-                if rounded_time > 0:
-                    await channel.send(f"{mention_text} ⏰ **{description}** will start in **{rounded_time}** minutes!")
+                
+                if rounded_time == 1:
+                    time_unit = "minute"
+                elif rounded_time < 60:
+                    time_unit = "minutes"
+                elif rounded_time == 60:
+                    rounded_time = 1
+                    time_unit = "hour"
+                elif rounded_time < 1440:
+                    rounded_time = round(rounded_time / 60)
+                    time_unit = "hours"
+                elif rounded_time == 1440:
+                    rounded_time = 1
+                    time_unit = "day"
                 else:
-                    await channel.send(f"{mention_text} ⏰ **{description}** ")
+                    rounded_time = round(rounded_time / 1440)
+                    time_unit = "days"
+
+                time_text = f"{rounded_time} {time_unit}"
+
+                if "EMBED_MESSAGE:" in description:
+                    try:
+                        embed_data = await self.get_notification_embed(id)
+                        
+                        if embed_data:
+                            try:
+                                embed = discord.Embed()
+                                
+                                try:
+                                    color_value = embed_data.get("color")
+                                    if color_value is not None:
+                                        embed.color = int(color_value)
+                                    else:
+                                        embed.color = discord.Color.blue()
+                                except (ValueError, TypeError):
+                                    embed.color = discord.Color.blue()
+
+                                title = embed_data.get("title", "")
+                                if title and isinstance(title, str):
+                                    title = title.replace("%t", time_text)
+                                    title = title.replace("{time}", time_text)
+                                    if "@tag" in title:
+                                        title = title.replace("@tag", mention_text)
+                                    embed.title = title
+
+                                description = embed_data.get("description", "")
+                                if description and isinstance(description, str):
+                                    description = description.replace("%t", time_text)
+                                    description = description.replace("{time}", time_text)
+                                    if "@tag" in description:
+                                        description = description.replace("@tag", mention_text)
+                                    embed.description = description
+
+                                image_url = embed_data.get("image_url", "")
+                                if image_url and isinstance(image_url, str) and image_url.strip() and image_url.startswith(('http://', 'https://')):
+                                    embed.set_image(url=image_url)
+
+                                thumbnail_url = embed_data.get("thumbnail_url", "")
+                                if thumbnail_url and isinstance(thumbnail_url, str) and thumbnail_url.strip() and thumbnail_url.startswith(('http://', 'https://')):
+                                    embed.set_thumbnail(url=thumbnail_url)
+
+                                footer_text = embed_data.get("footer", "")
+                                if footer_text and isinstance(footer_text, str):
+                                    footer_text = footer_text.replace("%t", time_text)
+                                    footer_text = footer_text.replace("{time}", time_text)
+                                    if "@tag" in footer_text:
+                                        footer_text = footer_text.replace("@tag", mention_text)
+                                    embed.set_footer(text=footer_text)
+
+                                author_text = embed_data.get("author", "")
+                                if author_text and isinstance(author_text, str):
+                                    author_text = author_text.replace("%t", time_text)
+                                    author_text = author_text.replace("{time}", time_text)
+                                    if "@tag" in author_text:
+                                        author_text = author_text.replace("@tag", mention_text)
+                                    embed.set_author(name=author_text)
+
+                                if embed.to_dict():
+                                    if mention_text:
+                                        mention_message = embed_data.get("mention_message", "")
+                                        if mention_message and "@tag" in mention_message:
+                                            mention_message = mention_message.replace("@tag", mention_text)
+                                            await channel.send(mention_message)
+                                        else:
+                                            await channel.send(mention_text)
+                                    await channel.send(embed=embed)
+                                else:
+                                    if rounded_time > 0:
+                                        await channel.send(f"{mention_text} ⏰ **Notification** will start in **{time_text}**!")
+                                    else:
+                                        await channel.send(f"{mention_text} ⏰ **Notification**")
+                            except Exception as e:
+                                print(f"Error creating embed: {e}")
+                                if rounded_time > 0:
+                                    await channel.send(f"{mention_text} ⏰ **Error sending embed notification** will start in **{time_text}**!")
+                                else:
+                                    await channel.send(f"{mention_text} ⏰ **Error sending embed notification**")
+                    except Exception as e:
+                        print(f"Error creating embed: {e}")
+                        if rounded_time > 0:
+                            await channel.send(f"{mention_text} ⏰ **Error sending embed notification** will start in **{time_text}**!")
+                        else:
+                            await channel.send(f"{mention_text} ⏰ **Error sending embed notification**")
+                else:
+                    actual_description = description
+                    if description.startswith("CUSTOM_TIMES:"):
+                        parts = description.split("|", 1)
+                        if len(parts) > 1:
+                            actual_description = parts[1]
+                    
+                    if actual_description.startswith("PLAIN_MESSAGE:"):
+                        actual_description = actual_description.replace("PLAIN_MESSAGE:", "", 1)
+                    
+                    if "@tag" in actual_description or "%t" in actual_description or "{time}" in actual_description:
+                        message = actual_description
+                        if "@tag" in message:
+                            message = message.replace("@tag", mention_text)
+                        if "%t" in message:
+                            message = message.replace("%t", time_text)
+                        if "{time}" in message:
+                            message = message.replace("{time}", time_text)
+                        await channel.send(message)
+                    else:
+                        if rounded_time > 0:
+                            await channel.send(f"{mention_text} ⏰ **{actual_description}** will start in **{time_text}**!")
+                        else:
+                            await channel.send(f"{mention_text} ⏰ **{actual_description}**")
 
                 current_time_str = now.strftime('%Y-%m-%d %H:%M:%S')
                 self.cursor.execute("""
@@ -360,509 +577,43 @@ class BearTrap(commands.Cog):
             print(f"Error in admin check: {e}")
             return False
 
-class TimeSelectModal(discord.ui.Modal, title="Set Notification Time"):
-    def __init__(self, cog: BearTrap):
-        super().__init__()
-        self.cog = cog
-        
-        current_utc = datetime.now(pytz.UTC)
-        
-        self.start_date = discord.ui.TextInput(
-            label="Start Date (DD/MM/YYYY)",
-            placeholder="Enter start date (e.g., 25/03/2024)",
-            min_length=8,
-            max_length=10,
-            required=True,
-            default=current_utc.strftime("%d/%m/%Y")
-        )
-        self.add_item(self.start_date)
-        
-        self.hour = discord.ui.TextInput(
-            label="Hour (0-23)",
-            placeholder="Enter hour (e.g., 14)",
-            min_length=1,
-            max_length=2,
-            required=True,
-            default=current_utc.strftime("%H")
-        )
-        self.add_item(self.hour)
-        
-        self.minute = discord.ui.TextInput(
-            label="Minute (0-59)",
-            placeholder="Enter minute (e.g., 30)",
-            min_length=1,
-            max_length=2,
-            required=True,
-            default=current_utc.strftime("%M")
-        )
-        self.add_item(self.minute)
-        
-        self.timezone = discord.ui.TextInput(
-            label="Timezone",
-            placeholder="Enter timezone (e.g., UTC, Europe/Istanbul)",
-            min_length=1,
-            max_length=50,
-            required=True,
-            default="UTC"
-        )
-        self.add_item(self.timezone)
-        
-        self.description = discord.ui.TextInput(
-            label="Notification Description",
-            placeholder="Enter description for this notification",
-            min_length=1,
-            max_length=100,
-            required=True,
-            style=discord.TextStyle.long
-        )
-        self.add_item(self.description)
-
-    async def on_submit(self, interaction: discord.Interaction):
+    async def show_channel_selection(self, interaction: discord.Interaction, start_date, hour, minute, timezone, message_data, channels):
         try:
+            embed = discord.Embed(
+                title="📢 Select Channel",
+                description=(
+                    "Choose a channel to send notifications:\n\n"
+                    "Select a text channel from the dropdown menu below.\n"
+                    "Make sure the bot has permission to send messages in the selected channel."
+                ),
+                color=discord.Color.blue()
+            )
 
-            try:
-                timezone = pytz.timezone(self.timezone.value)
-            except pytz.exceptions.UnknownTimeZoneError:
-                await interaction.response.send_message(
-                    "❌ Invalid timezone! Please use a valid timezone (e.g., UTC, Europe/Istanbul).",
-                    ephemeral=True
-                )
-                return
-
-            try:
-                start_date = datetime.strptime(self.start_date.value, "%d/%m/%Y")
-
-                now = datetime.now(timezone)
-
-                start_date = timezone.localize(start_date)
-                
-                if start_date.date() < now.date():
-                    await interaction.response.send_message(
-                        "❌ Start date cannot be in the past for the selected timezone!",
-                        ephemeral=True
-                    )
-                    return
-            except ValueError:
-                await interaction.response.send_message(
-                    "❌ Invalid date format! Please use DD/MM/YYYY format.",
-                    ephemeral=True
-                )
-                return
-
-            hour = int(self.hour.value)
-            minute = int(self.minute.value)
-            
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                raise ValueError("Invalid time format")
-
-            channels = interaction.guild.text_channels
-            await self.show_channel_selection(
-                interaction, 
+            view = ChannelSelectView(
+                self,
                 start_date,
-                hour, 
-                minute, 
-                self.timezone.value, 
-                self.description.value, 
-                channels
+                hour,
+                minute,
+                timezone,
+                message_data,
+                interaction.message
             )
 
-        except ValueError:
-            await interaction.response.send_message(
-                "❌ Invalid time format! Please use numbers for hour (0-23) and minute (0-59).",
-                ephemeral=True
-            )
-        except Exception as e:
-            print(f"Error in time modal: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while setting the time.",
-                ephemeral=True
-            )
-
-    async def show_channel_selection(self, interaction, start_date, hour, minute, timezone, description, channels):
-        total_pages = (len(channels) - 1) // 25 + 1
-        embed = discord.Embed(
-            title="📢 Select Notification Channel",
-            description=(
-                "**Selected Time Settings**\n"
-                f"📅 Start Date: {start_date.strftime('%d/%m/%Y')}\n"
-                f"⏰ Time: {hour:02d}:{minute:02d} {timezone}\n"
-                f"📝 Description: {description}\n\n"
-                "Please select a channel for notifications:\n"
-                f"Total Channels: {len(channels)} | Page 1/{total_pages}"
-            ),
-            color=discord.Color.blue()
-        )
-
-        view = PaginatedChannelSelectView(
-            self.cog, 
-            start_date,
-            hour, 
-            minute, 
-            timezone, 
-            description, 
-            channels
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-class PaginatedChannelSelectView(discord.ui.View):
-    def __init__(self, cog, start_date, hour, minute, timezone, description, channels):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.start_date = start_date
-        self.hour = hour
-        self.minute = minute
-        self.timezone = timezone
-        self.description = description
-        self.channels = channels
-        self.current_page = 0
-        self.items_per_page = 25
-        self.total_pages = (len(channels) - 1) // self.items_per_page + 1
-        self.update_buttons()
-
-    def update_buttons(self):
-        self.clear_items()
-        
-        start_idx = self.current_page * self.items_per_page
-        end_idx = min(start_idx + self.items_per_page, len(self.channels))
-        current_channels = self.channels[start_idx:end_idx]
-
-        select = discord.ui.Select(
-            placeholder=f"Select a channel (Page {self.current_page + 1}/{self.total_pages})",
-            options=[
-                discord.SelectOption(
-                    label=channel.name[:25],
-                    value=str(channel.id),
-                    description=f"Channel ID: {channel.id}"
-                ) for channel in current_channels
-            ]
-        )
-        select.callback = self.channel_selected
-        self.add_item(select)
-
-        if len(self.channels) > self.items_per_page:
-            if self.current_page > 0:
-                prev_button = discord.ui.Button(label="Previous Page", emoji="◀️", custom_id="prev")
-                prev_button.callback = self.previous_page
-                self.add_item(prev_button)
-
-            if (self.current_page + 1) * self.items_per_page < len(self.channels):
-                next_button = discord.ui.Button(label="Next Page", emoji="▶️", custom_id="next")
-                next_button.callback = self.next_page
-                self.add_item(next_button)
-
-    async def previous_page(self, interaction):
-        self.current_page = max(0, self.current_page - 1)
-        self.update_buttons()
-        
-        embed = interaction.message.embeds[0]
-        embed.description = embed.description.split("\n")
-        embed.description[-1] = f"Total Channels: {len(self.channels)} | Page {self.current_page + 1}/{self.total_pages}"
-        embed.description = "\n".join(embed.description)
-        
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    async def next_page(self, interaction):
-        max_pages = (len(self.channels) - 1) // self.items_per_page
-        self.current_page = min(max_pages, self.current_page + 1)
-        self.update_buttons()
-        
-        embed = interaction.message.embeds[0]
-        embed.description = embed.description.split("\n")
-        embed.description[-1] = f"Total Channels: {len(self.channels)} | Page {self.current_page + 1}/{self.total_pages}"
-        embed.description = "\n".join(embed.description)
-        
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    async def channel_selected(self, interaction):
-        channel_id = int(interaction.data["values"][0])
-
-        embed = discord.Embed(
-            title="⏰ Select Notification Type",
-            description=(
-                "Choose when to send notifications:\n\n"
-                "1️⃣ 30min, 10min, 5min and Time's up\n"
-                "2️⃣ 10min, 5min and Time's up\n"
-                "3️⃣ 5min and Time's up\n"
-                "4️⃣ Only 5min before\n"
-                "5️⃣ Only at Time's up"
-            ),
-            color=discord.Color.blue()
-        )
-
-        view = NotificationTypeView(
-            self.cog,
-            self.start_date,
-            self.hour,
-            self.minute,
-            self.timezone,
-            self.description,
-            channel_id
-        )
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class NotificationTypeView(discord.ui.View):
-    def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.start_date = start_date
-        self.hour = hour
-        self.minute = minute
-        self.timezone = timezone
-        self.description = description
-        self.channel_id = channel_id
-
-    @discord.ui.button(label="30m, 10m, 5m & Time", style=discord.ButtonStyle.primary, custom_id="type_1", row=0)
-    async def type_1(self, interaction, button):
-        await self.show_mention_options(interaction, 1)
-
-    @discord.ui.button(label="10m, 5m & Time", style=discord.ButtonStyle.primary, custom_id="type_2", row=0)
-    async def type_2(self, interaction, button):
-        await self.show_mention_options(interaction, 2)
-
-    @discord.ui.button(label="5m & Time", style=discord.ButtonStyle.primary, custom_id="type_3", row=1)
-    async def type_3(self, interaction, button):
-        await self.show_mention_options(interaction, 3)
-
-    @discord.ui.button(label="Only 5m", style=discord.ButtonStyle.primary, custom_id="type_4", row=1)
-    async def type_4(self, interaction, button):
-        await self.show_mention_options(interaction, 4)
-
-    @discord.ui.button(label="Only Time", style=discord.ButtonStyle.primary, custom_id="type_5", row=1)
-    async def type_5(self, interaction, button):
-        await self.show_mention_options(interaction, 5)
-
-    @discord.ui.button(label="Custom Times", style=discord.ButtonStyle.success, custom_id="type_6", row=2)
-    async def type_6(self, interaction, button):
-        modal = CustomTimesModal(self.cog, self.start_date, self.hour, self.minute, self.timezone, self.description, self.channel_id)
-        await interaction.response.send_modal(modal)
-
-    async def show_mention_options(self, interaction, notification_type):
-        embed = discord.Embed(
-            title="📢 Select Mention Type",
-            description=(
-                "Choose how to mention users:\n\n"
-                "1️⃣ @everyone\n"
-                "2️⃣ Specific Role"
-            ),
-            color=discord.Color.blue()
-        )
-
-        view = MentionTypeView(
-            self.cog,
-            self.start_date,
-            self.hour,
-            self.minute,
-            self.timezone,
-            self.description,
-            self.channel_id,
-            notification_type
-        )
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class CustomTimesModal(discord.ui.Modal, title="Set Custom Notification Times"):
-    def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id):
-        super().__init__()
-        self.cog = cog
-        self.start_date = start_date
-        self.hour = hour
-        self.minute = minute
-        self.timezone = timezone
-        self.description = description
-        self.channel_id = channel_id
-        
-        self.custom_times = discord.ui.TextInput(
-            label="Custom Notification Times",
-            placeholder="Enter times in minutes (e.g., 60-20-15-4-2 or 60-20-15-4-2-0)",
-            min_length=1,
-            max_length=50,
-            required=True,
-            style=discord.TextStyle.short
-        )
-        self.add_item(self.custom_times)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            times_str = self.custom_times.value.strip()
-            times = [int(t) for t in times_str.split('-')]
-            
-            if not all(isinstance(t, int) and t >= 0 for t in times):
-                raise ValueError("All times must be non-negative integers")
-                
-            if not times:
-                raise ValueError("At least one time must be specified")
-                
-            if not all(times[i] > times[i+1] for i in range(len(times)-1)):
-                raise ValueError("Times must be in descending order")
-
-            embed = discord.Embed(
-                title="📢 Select Mention Type",
-                description=(
-                    "Choose how to mention users:\n\n"
-                    "1️⃣ @everyone\n"
-                    "2️⃣ Specific Role"
-                ),
-                color=discord.Color.blue()
-            )
-
-            view = MentionTypeView(
-                self.cog,
-                self.start_date,
-                self.hour,
-                self.minute,
-                self.timezone,
-                self.description,
-                self.channel_id,
-                6,  
-                custom_times=times  
-            )
-            await interaction.response.edit_message(embed=embed, view=view)
-
-        except ValueError as e:
-            await interaction.response.send_message(
-                f"❌ Invalid input: {str(e)}",
-                ephemeral=True
-            )
-        except Exception as e:
-            print(f"Error in custom times modal: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while processing custom times.",
-                ephemeral=True
-            )
-
-class MentionTypeView(discord.ui.View):
-    def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id, notification_type, custom_times=None):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.start_date = start_date
-        self.hour = hour
-        self.minute = minute
-        self.timezone = timezone
-        self.description = description
-        self.channel_id = channel_id
-        self.notification_type = notification_type
-        self.custom_times = custom_times
-
-    @discord.ui.button(label="@everyone", emoji="👥", style=discord.ButtonStyle.primary, custom_id="everyone", row=0)
-    async def everyone_button(self, interaction, button):
-        await self.show_repeat_option(interaction, "everyone")
-
-    @discord.ui.button(label="Select Role", emoji="🎭", style=discord.ButtonStyle.primary, custom_id="role", row=0)
-    async def role_button(self, interaction, button):
-        roles = interaction.guild.roles
-        options = [
-            discord.SelectOption(
-                label=role.name[:25],
-                value=str(role.id),
-                description=f"Role ID: {role.id}"
-            ) for role in roles if role.name != "@everyone"
-        ]
-
-        select = discord.ui.Select(
-            placeholder="Select a role to mention",
-            options=options[:25]
-        )
-
-        async def role_selected(role_interaction):
-            role_id = int(role_interaction.data["values"][0])
-            await self.show_repeat_option(role_interaction, f"role_{role_id}")
-
-        select.callback = role_selected
-        view = discord.ui.View()
-        view.add_item(select)
-        
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                title="👥 Select Role",
-                description="Choose a role to mention:",
-                color=discord.Color.blue()
-            ),
-            view=view
-        )
-
-    @discord.ui.button(label="Select Member", emoji="👤", style=discord.ButtonStyle.primary, custom_id="member", row=1)
-    async def member_button(self, interaction, button):
-        prompt_message = await interaction.response.send_message(
-            "Please mention the member you want to notify by replying with @username",
-            ephemeral=True
-        )
-
-        def check(message):
-            return message.author.id == interaction.user.id and len(message.mentions) > 0
-
-        try:
-            message = await self.cog.bot.wait_for('message', timeout=30.0, check=check)
-            member = message.mentions[0]
-            await message.delete()
-
-            await interaction.delete_original_response()
-
-            embed = discord.Embed(
-                title="🔄 Repeat Settings",
-                description=(
-                    "**Configure Notification Repeat**\n\n"
-                    "Choose how often you want this notification to repeat:\n\n"
-                    "• No Repeat: Notification will be sent only once\n"
-                    "• Custom Interval: Set a custom repeat interval (minutes/hours/days/weeks/months)"
-                ),
-                color=discord.Color.blue()
-            )
-
-            view = RepeatOptionView(
-                self.cog,
-                self.start_date,
-                self.hour,
-                self.minute,
-                self.timezone,
-                self.description,
-                self.channel_id,
-                self.notification_type,
-                f"member_{member.id}"
-            )
-            
-            await interaction.followup.edit_message(
-                message_id=interaction.message.id,
+            await interaction.response.edit_message(
+                content=None,
                 embed=embed,
                 view=view
             )
-            
-        except asyncio.TimeoutError:
+
+        except Exception as e:
+            print(f"Error in show_channel_selection: {e}")
             await interaction.followup.send(
-                "❌ No member was mentioned within 30 seconds. Please try again.",
+                "❌ An error occurred while showing channel selection!",
                 ephemeral=True
             )
 
-    async def show_repeat_option(self, interaction, mention_type):
-        embed = discord.Embed(
-            title="🔄 Repeat Settings",
-            description=(
-                "**Configure Notification Repeat**\n\n"
-                "Choose how often you want this notification to repeat:\n\n"
-                "• No Repeat: Notification will be sent only once\n"
-                "• Custom Interval: Set a custom repeat interval (minutes/hours/days/weeks/months)"
-            ),
-            color=discord.Color.blue()
-        )
-
-        if self.notification_type == 6:
-            formatted_description = f"CUSTOM_TIMES:{'-'.join(map(str, self.custom_times))}|{self.description}"
-        else:
-            formatted_description = self.description
-
-        view = RepeatOptionView(
-            self.cog,
-            self.start_date,
-            self.hour,
-            self.minute,
-            self.timezone,
-            formatted_description,
-            self.channel_id,
-            self.notification_type,
-            mention_type
-        )
-        await interaction.response.edit_message(embed=embed, view=view)
-
 class RepeatOptionView(discord.ui.View):
-    def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id, notification_type, mention_type):
+    def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id, notification_type, mention_type, original_message):
         super().__init__(timeout=300)
         self.cog = cog
         self.start_date = start_date
@@ -873,12 +624,13 @@ class RepeatOptionView(discord.ui.View):
         self.channel_id = channel_id
         self.notification_type = notification_type
         self.mention_type = mention_type
+        self.original_message = original_message
 
-    @discord.ui.button(label="No Repeat", emoji="❌", style=discord.ButtonStyle.danger, custom_id="no_repeat")
+    @discord.ui.button(label="No Repeat", style=discord.ButtonStyle.danger, custom_id="no_repeat")
     async def no_repeat_button(self, interaction, button):
         await self.save_notification(interaction, False)
 
-    @discord.ui.button(label="Custom Interval", emoji="⏱️", style=discord.ButtonStyle.primary, custom_id="custom_interval")
+    @discord.ui.button(label="Custom Interval", style=discord.ButtonStyle.primary, custom_id="custom_interval")
     async def custom_interval_button(self, interaction, button):
         modal = RepeatIntervalModal(self)
         await interaction.response.send_modal(modal)
@@ -920,7 +672,7 @@ class RepeatOptionView(discord.ui.View):
                 member = interaction.guild.get_member(member_id)
                 mention_display = f"@{member.display_name}" if member else f"Member: {member_id}"
             else:
-                mention_display = "Unknown"
+                mention_display = "No Mention"
 
             if not repeat:
                 repeat_text = "❌ No repeat"
@@ -949,7 +701,7 @@ class RepeatOptionView(discord.ui.View):
                     f"**📅 Date:** {self.start_date.strftime('%d/%m/%Y')}\n"
                     f"**⏰ Time:** {self.hour:02d}:{self.minute:02d} {self.timezone}\n"
                     f"**📢 Channel:** <#{self.channel_id}>\n"
-                    f"**📝 Description:** {self.description}\n\n"
+                    f"**📝 Description:** {self.description.split('|')[-1] if '|' in self.description else self.description}\n\n"
                     f"**⚙️ Notification Type**\n{notification_types[self.notification_type]}\n\n"
                     f"**👥 Mentions:** {mention_display}\n"
                     f"**🔄 Repeat:** {repeat_text}"
@@ -960,12 +712,1008 @@ class RepeatOptionView(discord.ui.View):
             embed.set_footer(text="Created at")
             embed.timestamp = datetime.now()
             
-            await interaction.response.edit_message(embed=embed, view=None)
+            await interaction.response.edit_message(
+                content=None,
+                embed=embed,
+                view=None
+            )
 
         except Exception as e:
             print(f"Error saving notification: {e}")
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ An error occurred while saving the notification.",
+                ephemeral=True
+            )
+
+class RepeatIntervalModal(discord.ui.Modal):
+    def __init__(self, repeat_view: RepeatOptionView):
+        super().__init__(title="Set Repeat Interval")
+        self.repeat_view = repeat_view
+        
+        self.months = discord.ui.TextInput(
+            label="Months",
+            placeholder="Enter number of months (e.g., 1)",
+            min_length=0,
+            max_length=2,
+            required=False,
+            default="0",
+            style=discord.TextStyle.short
+        )
+        
+        self.weeks = discord.ui.TextInput(
+            label="Weeks",
+            placeholder="Enter number of weeks (e.g., 2)",
+            min_length=0,
+            max_length=2,
+            required=False,
+            default="0",
+            style=discord.TextStyle.short
+        )
+        
+        self.days = discord.ui.TextInput(
+            label="Days",
+            placeholder="Enter number of days (e.g., 3)",
+            min_length=0,
+            max_length=2,
+            required=False,
+            default="0",
+            style=discord.TextStyle.short
+        )
+        
+        self.hours = discord.ui.TextInput(
+            label="Hours",
+            placeholder="Enter number of hours (e.g., 12)",
+            min_length=0,
+            max_length=2,
+            required=False,
+            default="0",
+            style=discord.TextStyle.short
+        )
+        
+        self.minutes = discord.ui.TextInput(
+            label="Minutes",
+            placeholder="Enter number of minutes (e.g., 30)",
+            min_length=0,
+            max_length=2,
+            required=False,
+            default="0",
+            style=discord.TextStyle.short
+        )
+
+        for item in [self.months, self.weeks, self.days, self.hours, self.minutes]:
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            try:
+                months = int(self.months.value)
+                weeks = int(self.weeks.value)
+                days = int(self.days.value)
+                hours = int(self.hours.value)
+                minutes = int(self.minutes.value)
+            except ValueError:
+                await interaction.response.send_message(
+                    "❌ Please enter valid numbers for all fields!",
+                    ephemeral=True
+                )
+                return
+
+            if not any([months > 0, weeks > 0, days > 0, hours > 0, minutes > 0]):
+                await interaction.response.send_message(
+                    "❌ Please enter at least one time interval greater than 0!",
+                    ephemeral=True
+                )
+                return
+
+            total_minutes = (months * 30 * 24 * 60) + (weeks * 7 * 24 * 60) + (days * 24 * 60) + (hours * 60) + minutes
+
+            interval_parts = []
+            if months > 0:
+                interval_parts.append(f"{months} month{'s' if months > 1 else ''}")
+            if weeks > 0:
+                interval_parts.append(f"{weeks} week{'s' if weeks > 1 else ''}")
+            if days > 0:
+                interval_parts.append(f"{days} day{'s' if days > 1 else ''}")
+            if hours > 0:
+                interval_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+            if minutes > 0:
+                interval_parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+            
+            if len(interval_parts) > 1:
+                interval_text = ", ".join(interval_parts[:-1]) + " and " + interval_parts[-1]
+            else:
+                interval_text = interval_parts[0]
+            
+            await self.repeat_view.save_notification(interaction, True, total_minutes, interval_text)
+
+        except Exception as e:
+            print(f"Error in repeat interval modal: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while setting the repeat interval.",
+                ephemeral=True
+            )
+
+class TextInputModal(discord.ui.Modal):
+    def __init__(self, title, label, placeholder, default_value="", max_length=None, style=discord.TextStyle.short):
+        super().__init__(title=title)
+        self.value = None
+        self.input = discord.ui.TextInput(
+            label=label,
+            placeholder=placeholder,
+            default=default_value,
+            max_length=max_length,
+            style=style
+        )
+        self.add_item(self.input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.value = self.input.value
+        await interaction.response.defer()
+
+class EmbedEditorView(discord.ui.View):
+    def __init__(self, cog, start_date, hour, minute, timezone, original_message):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.start_date = start_date
+        self.hour = hour
+        self.minute = minute
+        self.timezone = timezone
+        self.original_message = original_message
+        self.embed_data = {
+            "title": "⏰ Bear Trap",
+            "description": "Add a description...",
+            "color": discord.Color.blue().value,
+            "footer": "Bear Trap Notification System",
+            "author": "Bear Trap",
+            "mention_message": ""
+        }
+
+    async def update_embed(self, interaction: discord.Interaction):
+        try:
+            example_time = "30 minutes"
+            embed = discord.Embed(color=self.embed_data.get("color", discord.Color.blue().value))
+            
+            if "title" in self.embed_data:
+                title = self.embed_data["title"].replace("%t", example_time).replace("{time}", example_time)
+                embed.title = title
+            if "description" in self.embed_data:
+                description = self.embed_data["description"].replace("%t", example_time).replace("{time}", example_time)
+                embed.description = description
+            if "footer" in self.embed_data:
+                footer = self.embed_data["footer"].replace("%t", example_time).replace("{time}", example_time)
+                embed.set_footer(text=footer)
+            if "author" in self.embed_data:
+                author = self.embed_data["author"].replace("%t", example_time).replace("{time}", example_time)
+                embed.set_author(name=author)
+            if "image_url" in self.embed_data and self.embed_data["image_url"]:
+                embed.set_image(url=self.embed_data["image_url"])
+            if "thumbnail_url" in self.embed_data and self.embed_data["thumbnail_url"]:
+                embed.set_thumbnail(url=self.embed_data["thumbnail_url"])
+
+            content = (
+                "📝 **Embed Editor**\n\n"
+                "**Note:** \n"
+                "• Use `%t` or `{time}` to show the remaining time\n"
+                "• Use `@tag` for mentions (will be replaced with the actual mention)\n"
+                "• You can use these in title, description, footer, and author fields\n"
+                "• Time will automatically show with appropriate units (minutes/hours/days)\n\n"
+                f"Currently showing '{example_time}' as an example.\n\n"
+                f"**Current Mention Message Preview:**\n"
+                f"{self.embed_data.get('mention_message', '@tag') if self.embed_data.get('mention_message') else '@tag'}\n\n"               
+            )
+
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(content=content, embed=embed, view=self)
+            else:
+                await interaction.followup.edit_message(message_id=interaction.message.id, content=content, embed=embed, view=self)
+            
+        except Exception as e:
+            print(f"Error updating embed: {e}")
+            try:
+                await interaction.followup.send("❌ An error occurred while updating the embed!", ephemeral=True)
+            except:
+                pass
+
+    @discord.ui.button(label="Mention Message", style=discord.ButtonStyle.secondary, row=1)
+    async def edit_mention_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Edit Mention Message",
+                label="Mention Message",
+                placeholder="Example: Hey @tag time! (@tag will be replaced with the actual mention)",
+                default_value=self.embed_data.get("mention_message", ""),
+                max_length=2000
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                self.embed_data["mention_message"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in edit_mention_message: {e}")
+            await interaction.followup.send("❌ An error occurred while editing the mention message!", ephemeral=True)
+
+    @discord.ui.button(label="Title", style=discord.ButtonStyle.primary, row=0)
+    async def edit_title(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Edit Title",
+                label="New Title",
+                placeholder="Example: ⏰ Bear starts in {time}!",
+                default_value=self.embed_data.get("title", ""),
+                max_length=256
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                self.embed_data["title"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in edit_title: {e}")
+            await interaction.followup.send("❌ An error occurred while editing the title!", ephemeral=True)
+
+    @discord.ui.button(label="Description", style=discord.ButtonStyle.primary, row=0)
+    async def edit_description(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Edit Description",
+                label="New Description",
+                placeholder="Example: Get ready for Bear! Only {time} remaining.",
+                default_value=self.embed_data.get("description", ""),
+                max_length=4000,
+                style=discord.TextStyle.paragraph
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                self.embed_data["description"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in edit_description: {e}")
+            await interaction.followup.send("❌ An error occurred while editing the description!", ephemeral=True)
+
+    @discord.ui.button(label="Color", style=discord.ButtonStyle.success, row=0)
+    async def edit_color(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            current_color = self.embed_data.get('color', discord.Color.blue().value)
+            current_hex = f"#{hex(current_color)[2:].zfill(6)}"
+            
+            modal = TextInputModal(
+                title="Color Code",
+                label="Hex Color Code",
+                placeholder="#FF0000",
+                default_value=current_hex,
+                max_length=7
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                try:
+                    hex_value = modal.value.strip('#')
+                    color_value = int(hex_value, 16)
+                    self.embed_data["color"] = color_value
+                    await self.update_embed(interaction)
+                except ValueError:
+                    await interaction.followup.send("❌ Invalid color code! Example: #FF0000", ephemeral=True)
+                    
+        except Exception as e:
+            print(f"Error in edit_color: {e}")
+            await interaction.followup.send("❌ An error occurred while editing the color!", ephemeral=True)
+
+    @discord.ui.button(label="Footer", style=discord.ButtonStyle.secondary, row=1)
+    async def edit_footer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Edit Footer",
+                label="Footer Text",
+                placeholder="Example: Bear Trap Notification System",
+                default_value=self.embed_data.get("footer", ""),
+                max_length=2048
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                self.embed_data["footer"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in edit_footer: {e}")
+            await interaction.followup.send("❌ An error occurred while editing the footer!", ephemeral=True)
+
+    @discord.ui.button(label="Author", style=discord.ButtonStyle.secondary, row=1)
+    async def edit_author(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Edit Author",
+                label="Author Text",
+                placeholder="Example: Bear Trap",
+                default_value=self.embed_data.get("author", ""),
+                max_length=256
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                self.embed_data["author"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in edit_author: {e}")
+            await interaction.followup.send("❌ An error occurred while editing the author!", ephemeral=True)
+
+    @discord.ui.button(label="Add Image", style=discord.ButtonStyle.secondary, row=2)
+    async def add_image(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Image URL",
+                label="Image URL",
+                placeholder="https://example.com/image.png",
+                default_value=self.embed_data.get("image_url", ""),
+                max_length=1000
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                if not modal.value.startswith(('http://', 'https://')):
+                    await interaction.followup.send("❌ Invalid URL! URL must start with 'http://' or 'https://'.", ephemeral=True)
+                    return
+
+                self.embed_data["image_url"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in add_image: {e}")
+            await interaction.followup.send("❌ An error occurred while adding the image!", ephemeral=True)
+
+    @discord.ui.button(label="Add Thumbnail", style=discord.ButtonStyle.secondary, row=2)
+    async def add_thumbnail(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = TextInputModal(
+                title="Thumbnail URL",
+                label="Thumbnail URL",
+                placeholder="https://example.com/thumbnail.png",
+                default_value=self.embed_data.get("thumbnail_url", ""),
+                max_length=1000
+            )
+            await interaction.response.send_modal(modal)
+            await modal.wait()
+            
+            if modal.value:
+                if not modal.value.startswith(('http://', 'https://')):
+                    await interaction.followup.send("❌ Invalid URL! URL must start with 'http://' or 'https://'.", ephemeral=True)
+                    return
+
+                self.embed_data["thumbnail_url"] = modal.value
+                await self.update_embed(interaction)
+                
+        except Exception as e:
+            print(f"Error in add_thumbnail: {e}")
+            await interaction.followup.send("❌ An error occurred while adding the thumbnail!", ephemeral=True)
+
+    @discord.ui.button(label="Confirm ✅", style=discord.ButtonStyle.green, row=3)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            self.cog.current_embed_data = self.embed_data
+
+            embed_data = "EMBED_MESSAGE:true"
+
+            await self.cog.show_channel_selection(
+                interaction,
+                self.start_date,
+                self.hour,
+                self.minute,
+                self.timezone,
+                embed_data,
+                interaction.guild.text_channels
+            )
+            
+        except Exception as e:
+            print(f"Error in confirm button: {e}")
+            try:
+                await interaction.followup.send(
+                    "❌ An error occurred while confirming the embed! Please try again.",
+                    ephemeral=True
+                )
+            except:
+                pass
+
+class MessageTypeView(discord.ui.View):
+    def __init__(self, cog, start_date, hour, minute, timezone):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.start_date = start_date
+        self.hour = hour
+        self.minute = minute
+        self.timezone = timezone
+        self.original_message = None
+
+    @discord.ui.button(label="Embed Message", style=discord.ButtonStyle.primary, emoji="📝", row=0)
+    async def embed_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            example_time = "30 minutes"
+            
+            embed = discord.Embed(
+                title="Bear Trap Notification",
+                description="Get ready for Bear! Only %t remaining.",
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="Bear Trap Notification System")
+            
+            content = (
+                "📝 **Embed Editor**\n\n"
+                "**Note:** \n"
+                "• Use `%t` or `{time}` to show the remaining time\n"
+                "• Use `@tag` for mentions (will be replaced with the actual mention)\n"
+                "• You can use these in title, description, footer, and author fields\n"
+                "• Time will automatically show with appropriate units (minutes/hours/days)\n\n"
+                f"Currently showing '{example_time}' as an example."
+            )
+
+            view = EmbedEditorView(
+                self.cog,
+                self.start_date,
+                self.hour,
+                self.minute,
+                self.timezone,
+                interaction.message
+            )
+            view.embed_data = {
+                "title": embed.title,
+                "description": embed.description,
+                "color": embed.color.value,
+                "footer": "Bear Trap Notification System"
+            }
+
+            await interaction.response.edit_message(
+                content=content,
+                embed=embed,
+                view=view
+            )
+            
+        except Exception as e:
+            print(f"Error in embed_message: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while starting the embed editor!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="Plain Message", style=discord.ButtonStyle.secondary, emoji="✍️", row=0)
+    async def plain_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = discord.ui.Modal(title="Message Content")
+        message_content = discord.ui.TextInput(
+            label="Message",
+            placeholder="Enter notification message... You can use @tag for mentions and %t or {time} for time",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=2000
+        )
+        modal.add_item(message_content)
+
+        async def modal_submit(modal_interaction):
+            channels = interaction.guild.text_channels
+            await self.cog.show_channel_selection(
+                modal_interaction,
+                self.start_date,
+                self.hour,
+                self.minute,
+                self.timezone,
+                f"PLAIN_MESSAGE:{message_content.value}",
+                channels
+            )
+
+        modal.on_submit = modal_submit
+        await interaction.response.send_modal(modal)
+
+class TimeSelectModal(discord.ui.Modal):
+    def __init__(self, cog: BearTrap):
+        super().__init__(title="Set Notification Time")
+        self.cog = cog
+        
+        current_utc = datetime.now(pytz.UTC)
+        
+        self.start_date = discord.ui.TextInput(
+            label="Start Date (DD/MM/YYYY)",
+            placeholder="Enter start date (e.g., 25/03/2024)",
+            min_length=8,
+            max_length=10,
+            required=True,
+            default=current_utc.strftime("%d/%m/%Y")
+        )
+        
+        self.hour = discord.ui.TextInput(
+            label="Hour (0-23)",
+            placeholder="Enter hour (e.g., 14)",
+            min_length=1,
+            max_length=2,
+            required=True,
+            default=current_utc.strftime("%H")
+        )
+        
+        self.minute = discord.ui.TextInput(
+            label="Minute (0-59)",
+            placeholder="Enter minute (e.g., 30)",
+            min_length=1,
+            max_length=2,
+            required=True,
+            default=current_utc.strftime("%M")
+        )
+        
+        self.timezone = discord.ui.TextInput(
+            label="Timezone",
+            placeholder="Enter timezone (e.g., UTC, Europe/Istanbul)",
+            min_length=1,
+            max_length=50,
+            required=True,
+            default="UTC"
+        )
+
+        for item in [self.start_date, self.hour, self.minute, self.timezone]:
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            try:
+                timezone = pytz.timezone(self.timezone.value)
+            except pytz.exceptions.UnknownTimeZoneError:
+                await interaction.response.send_message(
+                    "❌ Invalid timezone! Please use a valid timezone (e.g., UTC, Europe/Istanbul).",
+                    ephemeral=True
+                )
+                return
+
+            try:
+                start_date = datetime.strptime(self.start_date.value, "%d/%m/%Y")
+                now = datetime.now(timezone)
+                start_date = timezone.localize(start_date)
+                
+                if start_date.date() < now.date():
+                    await interaction.response.send_message(
+                        "❌ Start date cannot be in the past for the selected timezone!",
+                        ephemeral=True
+                    )
+                    return
+            except ValueError:
+                await interaction.response.send_message(
+                    "❌ Invalid date format! Please use DD/MM/YYYY format.",
+                    ephemeral=True
+                )
+                return
+
+            hour = int(self.hour.value)
+            minute = int(self.minute.value)
+            
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError("Invalid time format")
+
+            view = MessageTypeView(
+                self.cog,
+                start_date,
+                hour,
+                minute,
+                self.timezone.value
+            )
+            
+            embed = discord.Embed(
+                title="📝 Select Message Type",
+                description=(
+                    "How should your notification message look?\n\n"
+                    "**📝 Embed Message**\n"
+                    "• Customizable title\n"
+                    "• Rich text format\n"
+                    "• Custom color selection\n"
+                    "• Footer and author\n\n"
+                    "**✍️ Plain Message**\n"
+                    "• Simple text format\n"
+                    "• Quick creation"
+                ),
+                color=discord.Color.blue()
+            )
+
+            await interaction.response.send_message(
+                embed=embed,
+                view=view,
+                ephemeral=True
+            )
+
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Invalid time format! Please use numbers for hour (0-23) and minute (0-59).",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"Error in time modal: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while setting the time.",
+                ephemeral=True
+            )
+
+class NotificationTypeView(discord.ui.View):
+    def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, original_message):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.start_date = start_date
+        self.hour = hour
+        self.minute = minute
+        self.timezone = timezone
+        self.message_data = message_data
+        self.channel_id = channel_id
+        self.original_message = original_message
+
+    @discord.ui.button(label="30m, 10m, 5m & Time", style=discord.ButtonStyle.primary, custom_id="type_1", row=0)
+    async def type_1(self, interaction, button):
+        await self.show_mention_type_menu(interaction, 1)
+
+    @discord.ui.button(label="10m, 5m & Time", style=discord.ButtonStyle.primary, custom_id="type_2", row=0)
+    async def type_2(self, interaction, button):
+        await self.show_mention_type_menu(interaction, 2)
+
+    @discord.ui.button(label="5m & Time", style=discord.ButtonStyle.primary, custom_id="type_3", row=1)
+    async def type_3(self, interaction, button):
+        await self.show_mention_type_menu(interaction, 3)
+
+    @discord.ui.button(label="Only 5m", style=discord.ButtonStyle.primary, custom_id="type_4", row=1)
+    async def type_4(self, interaction, button):
+        await self.show_mention_type_menu(interaction, 4)
+
+    @discord.ui.button(label="Only Time", style=discord.ButtonStyle.primary, custom_id="type_5", row=1)
+    async def type_5(self, interaction, button):
+        await self.show_mention_type_menu(interaction, 5)
+
+    @discord.ui.button(label="Custom Times", style=discord.ButtonStyle.success, custom_id="type_6", row=2)
+    async def type_6(self, interaction, button):
+        modal = CustomTimesModal(self.cog, self.start_date, self.hour, self.minute, self.timezone, self.message_data, self.channel_id, self.original_message)
+        await interaction.response.send_modal(modal)
+
+    async def show_mention_type_menu(self, interaction, notification_type):
+        try:
+            embed = discord.Embed(
+                title="📢 Select Mention Type",
+                description=(
+                    "Choose how to mention users:\n\n"
+                    "1️⃣ @everyone\n"
+                    "2️⃣ Specific Role\n"
+                    "3️⃣ Specific Member\n"
+                    "4️⃣ No Mention"
+                ),
+                color=discord.Color.blue()
+            )
+
+            view = MentionTypeView(
+                self.cog,
+                self.start_date,
+                self.hour,
+                self.minute,
+                self.timezone,
+                self.message_data,
+                self.channel_id,
+                notification_type,
+                self.original_message
+            )
+
+            await interaction.response.edit_message(
+                content=None,
+                embed=embed,
+                view=view
+            )
+        except Exception as e:
+            print(f"Error in show_mention_type_menu: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while showing mention options!",
+                ephemeral=True
+            )
+
+class CustomTimesModal(discord.ui.Modal):
+    def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, original_message):
+        super().__init__(title="Set Custom Notification Times")
+        self.cog = cog
+        self.start_date = start_date
+        self.hour = hour
+        self.minute = minute
+        self.timezone = timezone
+        self.message_data = message_data
+        self.channel_id = channel_id
+        self.original_message = original_message
+        
+        self.custom_times = discord.ui.TextInput(
+            label="Custom Notification Times",
+            placeholder="Enter times in minutes (e.g., 60-20-15-4-2 or 60-20-15-4-2-0)",
+            min_length=1,
+            max_length=50,
+            required=True,
+            style=discord.TextStyle.short
+        )
+        self.add_item(self.custom_times)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            times_str = self.custom_times.value.strip()
+            times = [int(t) for t in times_str.split('-')]
+            
+            if not all(isinstance(t, int) and t >= 0 for t in times):
+                raise ValueError("All times must be non-negative integers")
+                
+            if not times:
+                raise ValueError("At least one time must be specified")
+                
+            if not all(times[i] > times[i+1] for i in range(len(times)-1)):
+                raise ValueError("Times must be in descending order")
+
+            embed = discord.Embed(
+                title="📢 Select Mention Type",
+                description=(
+                    "Choose how to mention users:\n\n"
+                    "1️⃣ @everyone\n"
+                    "2️⃣ Specific Role\n"
+                    "3️⃣ Specific Member\n"
+                    "4️⃣ No Mention"
+                ),
+                color=discord.Color.blue()
+            )
+
+            view = MentionTypeView(
+                self.cog,
+                self.start_date,
+                self.hour,
+                self.minute,
+                self.timezone,
+                f"CUSTOM_TIMES:{'-'.join(map(str, times))}|{self.message_data}",
+                self.channel_id,
+                6,
+                self.original_message
+            )
+
+            await interaction.response.edit_message(
+                content=None,
+                embed=embed,
+                view=view
+            )
+
+        except ValueError as e:
+            await interaction.response.send_message(
+                f"❌ Invalid input: {str(e)}",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"Error in custom times modal: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while processing custom times.",
+                ephemeral=True
+            )
+
+class MentionTypeView(discord.ui.View):
+    def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, notification_type, original_message):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.start_date = start_date
+        self.hour = hour
+        self.minute = minute
+        self.timezone = timezone
+        self.message_data = message_data
+        self.channel_id = channel_id
+        self.notification_type = notification_type
+        self.original_message = original_message
+
+    async def show_mention_type_menu(self, interaction, mention_type):
+        try:
+            embed = discord.Embed(
+                title="🔄 Repeat Settings",
+                description=(
+                    "**Configure Notification Repeat**\n\n"
+                    "Choose how often you want this notification to repeat:\n\n"
+                    "• No Repeat: Notification will be sent only once\n"
+                    "• Custom Interval: Set a custom repeat interval (minutes/hours/days/weeks/months)"
+                ),
+                color=discord.Color.blue()
+            )
+
+            view = RepeatOptionView(
+                self.cog,
+                self.start_date,
+                self.hour,
+                self.minute,
+                self.timezone,
+                self.message_data,
+                self.channel_id,
+                self.notification_type,
+                mention_type,
+                self.original_message
+            )
+
+            await interaction.response.edit_message(
+                content=None,
+                embed=embed,
+                view=view
+            )
+        except Exception as e:
+            print(f"Error in show_mention_type_menu: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while showing mention options!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="@everyone", style=discord.ButtonStyle.danger, emoji="📢", row=0)
+    async def everyone_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await self.show_mention_type_menu(interaction, "everyone")
+        except Exception as e:
+            print(f"Error in everyone button: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while setting @everyone mention!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="Select Member", style=discord.ButtonStyle.primary, emoji="👤", row=0)
+    async def member_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            select = discord.ui.UserSelect(
+                placeholder="Select a member to mention",
+                min_values=1,
+                max_values=1
+            )
+
+            async def user_select_callback(select_interaction):
+                try:
+                    selected_user_id = select_interaction.data["values"][0]
+                    await self.show_mention_type_menu(select_interaction, f"member_{selected_user_id}")
+                except Exception as e:
+                    print(f"Error in user selection: {e}")
+                    await select_interaction.followup.send(
+                        "❌ An error occurred while selecting the member!",
+                        ephemeral=True
+                    )
+
+            select.callback = user_select_callback
+            view = discord.ui.View(timeout=300)
+            view.add_item(select)
+
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="👤 Select Member",
+                    description="Choose a member to mention:",
+                    color=discord.Color.blue()
+                ),
+                view=view
+            )
+        except Exception as e:
+            print(f"Error in member button: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while showing member selection!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="Select Role", style=discord.ButtonStyle.success, emoji="👥", row=0)
+    async def role_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            select = discord.ui.RoleSelect(
+                placeholder="Select a role to mention",
+                min_values=1,
+                max_values=1
+            )
+
+            async def role_select_callback(select_interaction):
+                try:
+                    selected_role_id = select_interaction.data["values"][0]
+                    await self.show_mention_type_menu(select_interaction, f"role_{selected_role_id}")
+                except Exception as e:
+                    print(f"Error in role selection: {e}")
+                    await select_interaction.followup.send(
+                        "❌ An error occurred while selecting the role!",
+                        ephemeral=True
+                    )
+
+            select.callback = role_select_callback
+            view = discord.ui.View(timeout=300)
+            view.add_item(select)
+
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="👥 Select Role",
+                    description="Choose a role to mention:",
+                    color=discord.Color.blue()
+                ),
+                view=view
+            )
+        except Exception as e:
+            print(f"Error in role button: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while showing role selection!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="No Mention", style=discord.ButtonStyle.secondary, emoji="🔕", row=0)
+    async def no_mention_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await self.show_mention_type_menu(interaction, "none")
+        except Exception as e:
+            print(f"Error in no mention button: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while setting no mention!",
+                ephemeral=True
+            )
+
+class MentionSelectMenu(discord.ui.Select):
+    def __init__(self, view):
+        self.parent_view = view
+        
+        options = []
+        
+        options.append(
+            discord.SelectOption(
+                label="@everyone",
+                value="everyone",
+                description="Mention everyone in the server",
+                emoji="📢"
+            )
+        )
+        
+        options.append(
+            discord.SelectOption(
+                label="No Mention",
+                value="none",
+                description="Don't mention anyone",
+                emoji="🔕"
+            )
+        )
+        
+        guild = view.original_message.guild
+        roles = sorted(
+            [role for role in guild.roles if not role.is_default() and not role.managed],
+            key=lambda r: r.position,
+            reverse=True
+        )
+        
+        for role in roles:
+            options.append(
+                discord.SelectOption(
+                    label=role.name,
+                    value=f"role_{role.id}",
+                    description=f"Role with {len(role.members)} members",
+                    emoji="👥"
+                )
+            )
+        
+        members = sorted(
+            [member for member in guild.members if not member.bot],
+            key=lambda m: m.display_name.lower()
+        )
+        
+        for member in members:
+            options.append(
+                discord.SelectOption(
+                    label=member.display_name,
+                    value=f"member_{member.id}",
+                    description=f"@{member.name}",
+                    emoji="👤"
+                )
+            )
+        
+        super().__init__(
+            placeholder="🔍 Search and select who to mention...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            selected_value = self.values[0]
+            
+            await self.parent_view.show_mention_type_menu(interaction, selected_value)
+            
+        except Exception as e:
+            print(f"Error in mention selection: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while processing your selection!",
                 ephemeral=True
             )
 
@@ -1016,7 +1764,6 @@ class BearTrapView(discord.ui.View):
                         value=str(notif[0])
                     )
                 )
-
             select = discord.ui.Select(
                 placeholder="Select a notification to remove",
                 options=options[:25]
@@ -1088,7 +1835,8 @@ class BearTrapView(discord.ui.View):
                     
                     async def confirm_callback(confirm_interaction):
                         try:
-
+                            self.cog.cursor.execute("DELETE FROM bear_notification_embeds WHERE notification_id = ?", (notification_id,))
+                            
                             self.cog.cursor.execute("DELETE FROM notification_history WHERE notification_id = ?", (notification_id,))
 
                             self.cog.cursor.execute("DELETE FROM bear_notifications WHERE id = ?", (notification_id,))
@@ -1177,7 +1925,6 @@ class BearTrapView(discord.ui.View):
                         value=str(notif[0])
                     )
                 )
-
             select = discord.ui.Select(
                 placeholder="Select a notification to view details",
                 options=options[:25]
@@ -1230,122 +1977,83 @@ class BearTrapView(discord.ui.View):
                         else:
                             repeat_text = f"🔄 Repeats every {minutes} minutes"
 
-                    next_notification = datetime.fromisoformat(selected_notif[15])
-                    tz = pytz.timezone(selected_notif[5])  
-                    
-                    if not next_notification.tzinfo:
-                        next_notification = tz.localize(next_notification)
-
-                    now = datetime.now(tz)
-
-                    if selected_notif[9] and selected_notif[10] > 0:  
-
-                        custom_times = None
-                        if selected_notif[7] == 6 and 'CUSTOM_TIMES:' in selected_notif[6]:
-                            custom_times = [int(t) for t in selected_notif[6].split('CUSTOM_TIMES:')[1].split('|')[0].split('-')]
-
+                    embed_data = None
+                    if "EMBED_MESSAGE:" in selected_notif[6]:
                         self.cog.cursor.execute("""
-                            SELECT sent_at, notification_time
-                            FROM notification_history 
+                            SELECT title, description, color, image_url, thumbnail_url, footer, author, mention_message
+                            FROM bear_notification_embeds 
                             WHERE notification_id = ?
-                            ORDER BY sent_at DESC
-                            LIMIT 1
                         """, (notification_id,))
-                        
-                        last_notification_data = self.cog.cursor.fetchone()
-                        
-                        if last_notification_data and custom_times:
-                            last_notification_time, last_custom_time = last_notification_data
-                            last_notification = datetime.strptime(last_notification_time, '%Y-%m-%d %H:%M:%S')
-                            last_notification = tz.localize(last_notification)
+                        embed_result = self.cog.cursor.fetchone()
+                        if embed_result:
+                            embed_data = {
+                                'title': embed_result[0],
+                                'description': embed_result[1],
+                                'color': embed_result[2],
+                                'image_url': embed_result[3],
+                                'thumbnail_url': embed_result[4],
+                                'footer': embed_result[5],
+                                'author': embed_result[6],
+                                'mention_message': embed_result[7]
+                            }
 
-                            time_diff = (now - last_notification).total_seconds() / 60
-                            periods_passed = int(time_diff / selected_notif[10])
-                            next_base = last_notification + timedelta(minutes=selected_notif[10] * periods_passed)
-
-                            minutes_until_next = (next_base - now).total_seconds() / 60
-                            next_custom_time = None
-
-                            sorted_times = sorted(custom_times, reverse=True)
-                            for custom_time in sorted_times:
-                                if minutes_until_next > custom_time:
-
-                                    if custom_time < last_custom_time:
-                                        next_custom_time = custom_time
-                                        break
-                            
-                            if next_custom_time is None:  
-
-                                next_base = next_base + timedelta(minutes=selected_notif[10])
-                                next_custom_time = max(custom_times)
-                            
-                            next_notification = next_base - timedelta(minutes=next_custom_time)
-                        elif custom_times:
-
-                            base_time = datetime.fromisoformat(selected_notif[15])
-                            if not base_time.tzinfo:
-                                base_time = tz.localize(base_time)
-
-                            next_custom_time = max(custom_times)
-                            next_notification = base_time - timedelta(minutes=next_custom_time)
-
-                            if next_notification < now:
-                                periods_to_add = ((now - next_notification).total_seconds() // 60) // selected_notif[10] + 1
-                                next_notification = base_time + timedelta(minutes=selected_notif[10] * periods_to_add) - timedelta(minutes=next_custom_time)
-                        else:
-
-                            time_diff = (now - next_notification).total_seconds() / 60
-                            periods_passed = int(time_diff / selected_notif[10]) + 1
-                            next_notification = next_notification + timedelta(minutes=selected_notif[10] * periods_passed)
-
-                        time_until = next_notification - now
-
-                        days = time_until.days
-                        hours, remainder = divmod(time_until.seconds, 3600)
-                        minutes, seconds = divmod(remainder, 60)
-                        
-                        time_parts = []
-                        if days > 0:
-                            time_parts.append(f"{days} day{'s' if days != 1 else ''}")
-                        if hours > 0:
-                            time_parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
-                        if minutes > 0:
-                            time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
-                        if seconds > 0 or not time_parts:
-                            time_parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
-                        
-                        time_until_text = ", ".join(time_parts)
-
-                        description = (
-                            f"**📅 Date:** {next_notification.strftime('%d/%m/%Y')}\n"
+                    details_embed = discord.Embed(
+                        title="📋 Notification Details",
+                        description=(
+                            f"**📅 Date:** {datetime.fromisoformat(selected_notif[15]).strftime('%d/%m/%Y')}\n"
                             f"**⏰ Time:** {selected_notif[3]:02d}:{selected_notif[4]:02d} {selected_notif[5]}\n"
                             f"**📢 Channel:** <#{selected_notif[2]}>\n"
                             f"**📝 Description:** {selected_notif[6].split('|')[-1] if '|' in selected_notif[6] else selected_notif[6]}\n\n"
-                            f"**⚙️ Notification Type**\n{notification_types[selected_notif[7]]}\n"
-                        )
+                            f"**⚙️ Notification Type**\n{notification_types[selected_notif[7]]}\n\n"
+                            f"**👥 Mentions:** {mention_display}\n"
+                            f"**🔄 Repeat:** {repeat_text}"
+                        ),
+                        color=discord.Color.blue()
+                    )
 
-                        if selected_notif[7] == 6 and 'CUSTOM_TIMES:' in selected_notif[6]:  
-                            custom_times = selected_notif[6].split('CUSTOM_TIMES:')[1].split('|')[0].split('-')
-                            description += f"**🕒 Custom Times:** {', '.join(custom_times)} minutes before\n"
-
-                        description += (
-                            f"\n**👥 Mentions:** {mention_display}\n"
-                            f"**🔄 Repeat:** {repeat_text}\n\n"
-                            f"**⏳ Next notification in:** {time_until_text}"
-                        )
-
-                        embed = discord.Embed(
-                            title="📋 Notification Details",
-                            description=description,
-                            color=discord.Color.blue()
+                    if embed_data:
+                        preview_embed = discord.Embed(
+                            title=embed_data['title'] if embed_data['title'] else "No Title",
+                            description=embed_data['description'] if embed_data['description'] else "No Description",
+                            color=embed_data['color'] if embed_data['color'] else discord.Color.blue()
                         )
                         
-                        await select_interaction.response.edit_message(embed=embed)
+                        if embed_data['image_url']:
+                            preview_embed.set_image(url=embed_data['image_url'])
+                        if embed_data['thumbnail_url']:
+                            preview_embed.set_thumbnail(url=embed_data['thumbnail_url'])
+                        if embed_data['footer']:
+                            preview_embed.set_footer(text=embed_data['footer'])
+                        if embed_data['author']:
+                            preview_embed.set_author(name=embed_data['author'])
+
+                        mention_preview = ""
+                        if embed_data['mention_message']:
+                            mention_preview = embed_data['mention_message']
+                            example_time = "30 minutes"
+                            if "%t" in mention_preview:
+                                mention_preview = mention_preview.replace("%t", example_time)
+                            if "{time}" in mention_preview:
+                                mention_preview = mention_preview.replace("{time}", example_time)
+
+                        await select_interaction.response.edit_message(
+                            content="**📋 Notification Details & Preview**\n\n**Message Preview:**" + 
+                                  (f"\n{mention_preview}" if mention_preview else ""),
+                            embeds=[details_embed, preview_embed]
+                        )
+                    else:
+                        message_preview = None
+                        if "PLAIN_MESSAGE:" in selected_notif[6]:
+                            message_preview = selected_notif[6].replace("PLAIN_MESSAGE:", "")
                         
+                        await select_interaction.response.edit_message(
+                            content="**📋 Notification Details**" + 
+                                  (f"\n\n**Message Preview:**\n{message_preview}" if message_preview else ""),
+                            embed=details_embed
+                        )
+                    
                 except Exception as e:
                     print(f"Error in view notification callback: {e}")
-                    import traceback
-                    traceback.print_exc()
                     await select_interaction.response.send_message(
                         "❌ An error occurred while viewing notification details.",
                         ephemeral=True
@@ -1398,7 +2106,6 @@ class BearTrapView(discord.ui.View):
                         value=str(notif[0])
                     )
                 )
-
             select = discord.ui.Select(
                 placeholder="Select a notification to toggle",
                 options=options[:25]
@@ -1461,110 +2168,95 @@ class BearTrapView(discord.ui.View):
                 ephemeral=True
             )
 
-class RepeatIntervalModal(discord.ui.Modal, title="Set Repeat Interval"):
-    def __init__(self, repeat_view: RepeatOptionView):
-        super().__init__()
-        self.repeat_view = repeat_view
+class ChannelSelectView(discord.ui.View):
+    def __init__(self, cog, start_date, hour, minute, timezone, message_data, original_message):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.start_date = start_date
+        self.hour = hour
+        self.minute = minute
+        self.timezone = timezone
+        self.message_data = message_data
+        self.original_message = original_message
         
-        self.months = discord.ui.TextInput(
-            label="Months",
-            placeholder="Enter number of months (e.g., 1)",
-            min_length=0,
-            max_length=2,
-            required=False,
-            default="0"
-        )
-        self.add_item(self.months)
-        
-        self.weeks = discord.ui.TextInput(
-            label="Weeks",
-            placeholder="Enter number of weeks (e.g., 2)",
-            min_length=0,
-            max_length=2,
-            required=False,
-            default="0"
-        )
-        self.add_item(self.weeks)
-        
-        self.days = discord.ui.TextInput(
-            label="Days",
-            placeholder="Enter number of days (e.g., 3)",
-            min_length=0,
-            max_length=2,
-            required=False,
-            default="0"
-        )
-        self.add_item(self.days)
-        
-        self.hours = discord.ui.TextInput(
-            label="Hours",
-            placeholder="Enter number of hours (e.g., 12)",
-            min_length=0,
-            max_length=2,
-            required=False,
-            default="0"
-        )
-        self.add_item(self.hours)
-        
-        self.minutes = discord.ui.TextInput(
-            label="Minutes",
-            placeholder="Enter number of minutes (e.g., 30)",
-            min_length=0,
-            max_length=2,
-            required=False,
-            default="0"
-        )
-        self.add_item(self.minutes)
+        self.add_item(ChannelSelectMenu(self))
 
-    async def on_submit(self, interaction: discord.Interaction):
+class ChannelSelectMenu(discord.ui.ChannelSelect):
+    def __init__(self, view):
+        self.parent_view = view
+        super().__init__(
+            placeholder="Select a channel for notifications",
+            channel_types=[discord.ChannelType.text],
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
         try:
-            try:
-                months = int(self.months.value)
-                weeks = int(self.weeks.value)
-                days = int(self.days.value)
-                hours = int(self.hours.value)
-                minutes = int(self.minutes.value)
-            except ValueError:
+            channel = self.values[0]
+            actual_channel = interaction.guild.get_channel(channel.id)
+            if not actual_channel.permissions_for(interaction.guild.me).send_messages:
                 await interaction.response.send_message(
-                    "❌ Please enter valid numbers for all fields!",
+                    "❌ I don't have permission to send messages in this channel!",
                     ephemeral=True
                 )
                 return
 
-            if not any([months > 0, weeks > 0, days > 0, hours > 0, minutes > 0]):
-                await interaction.response.send_message(
-                    "❌ Please enter at least one time interval greater than 0!",
-                    ephemeral=True
-                )
-                return
+            embed = discord.Embed(
+                title="⏰ Select Notification Type",
+                description=(
+                    "Choose when to send notifications:\n\n"
+                    "**30m, 10m, 5m & Time**\n"
+                    "• 30 minutes before\n"
+                    "• 10 minutes before\n"
+                    "• 5 minutes before\n"
+                    "• When time's up\n\n"
+                    "**10m, 5m & Time**\n"
+                    "• 10 minutes before\n"
+                    "• 5 minutes before\n"
+                    "• When time's up\n\n"
+                    "**5m & Time**\n"
+                    "• 5 minutes before\n"
+                    "• When time's up\n\n"
+                    "**Only 5m**\n"
+                    "• Only 5 minutes before\n\n"
+                    "**Only Time**\n"
+                    "• Only when time's up\n\n"
+                    "**Custom Times**\n"
+                    "• Set your own notification times"
+                ),
+                color=discord.Color.blue()
+            )
 
-            total_minutes = (months * 30 * 24 * 60) + (weeks * 7 * 24 * 60) + (days * 24 * 60) + (hours * 60) + minutes
+            view = NotificationTypeView(
+                self.parent_view.cog,
+                self.parent_view.start_date,
+                self.parent_view.hour,
+                self.parent_view.minute,
+                self.parent_view.timezone,
+                self.parent_view.message_data,
+                channel.id,
+                self.parent_view.original_message
+            )
 
-            interval_parts = []
-            if months > 0:
-                interval_parts.append(f"{months} month{'s' if months > 1 else ''}")
-            if weeks > 0:
-                interval_parts.append(f"{weeks} week{'s' if weeks > 1 else ''}")
-            if days > 0:
-                interval_parts.append(f"{days} day{'s' if days > 1 else ''}")
-            if hours > 0:
-                interval_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
-            if minutes > 0:
-                interval_parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
-            
-            if len(interval_parts) > 1:
-                interval_text = ", ".join(interval_parts[:-1]) + " and " + interval_parts[-1]
-            else:
-                interval_text = interval_parts[0]
-            
-            await self.repeat_view.save_notification(interaction, True, total_minutes, interval_text)
+            await interaction.response.edit_message(
+                content=None,
+                embed=embed,
+                view=view
+            )
 
         except Exception as e:
-            print(f"Error in repeat interval modal: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while setting the repeat interval.",
-                ephemeral=True
-            )
+            print(f"Error in channel select callback: {e}")
+            try:
+                await interaction.response.send_message(
+                    "❌ An error occurred while processing your selection!",
+                    ephemeral=True
+                )
+            except discord.InteractionResponded:
+                await interaction.followup.send(
+                    "❌ An error occurred while processing your selection!",
+                    ephemeral=True
+                )
 
 async def setup(bot):
     await bot.add_cog(BearTrap(bot)) 
