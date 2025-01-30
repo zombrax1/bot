@@ -13,6 +13,7 @@ import re
 from .alliance_member_operations import AllianceSelectView
 from .alliance import PaginatedChannelView
 import os
+import traceback
 
 class GiftOperations(commands.Cog):
     def __init__(self, bot):
@@ -70,24 +71,171 @@ class GiftOperations(commands.Cog):
         self.log_directory = 'log'
         if not os.path.exists(self.log_directory):
             os.makedirs(self.log_directory)
-
+            
     @commands.Cog.listener()
     async def on_ready(self):
         try:
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS giftcodecontrol (
-                    alliance_id INTEGER PRIMARY KEY,
-                    status INTEGER DEFAULT 0
-                )
-            """)
-            self.conn.commit()
-            
+            self.cursor.execute("SELECT channel_id FROM giftcode_channel")
+            channel_ids = [row[0] for row in self.cursor.fetchall()]
+
+            invalid_channels = []
+            for channel_id in channel_ids:
+                channel = self.bot.get_channel(channel_id)
+                if not channel:
+                    invalid_channels.append(channel_id)
+
+            if invalid_channels:
+                placeholders = ','.join('?' * len(invalid_channels))
+                self.cursor.execute(f"""
+                    DELETE FROM giftcode_channel 
+                    WHERE channel_id IN ({placeholders})
+                """, invalid_channels)
+                self.conn.commit()
+                print(f"Startup: Removed {len(invalid_channels)} invalid channels from database.")
+
             if not self.check_channels_loop.is_running():
                 self.check_channels_loop.start()
-            
-            
+
         except Exception as e:
-            print(f"[ERROR] Failed to create gift code control table: {str(e)}")
+            print(f"Error in on_ready: {str(e)}")
+
+    @discord.ext.commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        try:
+            if message.author.bot or not message.guild:
+                return
+
+            self.cursor.execute("SELECT alliance_id FROM giftcode_channel WHERE channel_id = ?", (message.channel.id,))
+            channel_info = self.cursor.fetchone()
+            
+            if not channel_info:
+                return
+
+            content = message.content.strip()
+            if not content:
+                return
+
+            giftcode = None
+            if len(content.split()) == 1:
+                giftcode = content
+            else:
+                code_match = re.search(r'Code:\s*(\S+)', content)
+                if code_match:
+                    giftcode = code_match.group(1)
+
+            if not giftcode:
+                await message.add_reaction("❌")
+                error_embed = discord.Embed(
+                    title="❌ Invalid Format",
+                    description=(
+                        f"**Gift Code Details**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 **Sender:** {message.author.mention}\n"
+                        f"❌ **Status:** Invalid gift code format\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ),
+                    color=discord.Color.red()
+                )
+                await message.reply(embed=error_embed, mention_author=False)
+                return
+
+            initial_check = await self.claim_giftcode_rewards_wos("244886619", giftcode)
+            
+            if initial_check == "USAGE_LIMIT":
+                await message.add_reaction("❌")
+                usage_limit_embed = discord.Embed(
+                    title="❌ Gift Code Usage Limit",
+                    description=(
+                        f"**Gift Code Details**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 **Sender:** {message.author.mention}\n"
+                        f"🎁 **Gift Code:** `{giftcode}`\n"
+                        f"❌ **Status:** Usage limit has been reached for this code\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ),
+                    color=discord.Color.red()
+                )
+                await message.reply(embed=usage_limit_embed, mention_author=False)
+                return
+
+            if initial_check == "TIME_ERROR":
+                await message.add_reaction("❌")
+                expired_embed = discord.Embed(
+                    title="❌ Gift Code Expired",
+                    description=(
+                        f"**Gift Code Details**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 **Sender:** {message.author.mention}\n"
+                        f"🎁 **Gift Code:** `{giftcode}`\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ),
+                    color=discord.Color.red()
+                )
+                await message.reply(embed=expired_embed, mention_author=False)
+                return
+
+            if initial_check == "CDK_NOT_FOUND":
+                await message.add_reaction("❌")
+                invalid_embed = discord.Embed(
+                    title="❌ Invalid Gift Code",
+                    description=(
+                        f"**Gift Code Details**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 **Sender:** {message.author.mention}\n"
+                        f"🎁 **Gift Code:** `{giftcode}`\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ),
+                    color=discord.Color.red()
+                )
+                await message.reply(embed=invalid_embed, mention_author=False)
+                return
+
+            if initial_check in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+                self.cursor.execute("SELECT 1 FROM gift_codes WHERE giftcode = ?", (giftcode,))
+                if not self.cursor.fetchone():
+                    self.cursor.execute(
+                        "INSERT INTO gift_codes (giftcode, date) VALUES (?, ?)",
+                        (giftcode, datetime.now().strftime("%Y-%m-%d"))
+                    )
+                    self.conn.commit()
+
+                    self.cursor.execute("SELECT alliance_id FROM giftcodecontrol WHERE status = 1")
+                    auto_alliances = self.cursor.fetchall()
+                    
+                    for alliance in auto_alliances:
+                        await self.use_giftcode_for_alliance(alliance[0], giftcode)
+
+                    success_embed = discord.Embed(
+                        title="✅ Gift Code Successfully Added",
+                        description=(
+                            f"**Gift Code Details**\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"👤 **Sender:** {message.author.mention}\n"
+                            f"🎁 **Gift Code:** `{giftcode}`\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        ),
+                        color=discord.Color.green()
+                    )
+                    await message.add_reaction("✅")
+                    await message.reply(embed=success_embed, mention_author=False)
+                else:
+                    already_exists_embed = discord.Embed(
+                        title="ℹ️ Gift Code Status",
+                        description=(
+                            f"**Gift Code Details**\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"👤 **Sender:** {message.author.mention}\n"
+                            f"🎁 **Gift Code:** `{giftcode}`\n"
+                            f"📝 **Status:** `Already in database`\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        ),
+                        color=discord.Color.blue()
+                    )
+                    await message.add_reaction("✅")
+                    await message.reply(embed=already_exists_embed, mention_author=False)
+
+        except Exception as e:
+            print(f"Error in on_message: {str(e)}")
 
     def encode_data(self, data):
         secret = self.wos_encrypt_key
@@ -126,6 +274,8 @@ class GiftOperations(commands.Cog):
 
     async def claim_giftcode_rewards_wos(self, player_id, giftcode):
         try:
+            log_file_path = os.path.join(self.log_directory, 'giftlog.txt')
+            
             if player_id != "244886619":
                 self.cursor.execute("""
                     SELECT status FROM user_giftcodes 
@@ -134,9 +284,17 @@ class GiftOperations(commands.Cog):
                 
                 existing_record = self.cursor.fetchone()
                 if existing_record:
+                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                        log_file.write(f"CACHE HIT - User {player_id} already processed with status: {existing_record[0]}\n")
                     return existing_record[0]
 
             session, response_stove_info = self.get_stove_info_wos(player_id=player_id)
+            
+            with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                log_file.write(f"\nAPI REQUEST - Player Info\n")
+                log_file.write(f"Player ID: {player_id}\n")
+                log_file.write(f"Response: {json.dumps(response_stove_info.json(), indent=2)}\n")
+                log_file.write("-" * 50 + "\n")
             
             if response_stove_info.json().get("msg") == "success":
                 data_to_encode = {
@@ -152,6 +310,13 @@ class GiftOperations(commands.Cog):
                 )
                 
                 response_json = response_giftcode.json()
+                
+                with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                    log_file.write(f"\nAPI REQUEST - Gift Code\n")
+                    log_file.write(f"Player ID: {player_id}\n")
+                    log_file.write(f"Gift Code: {giftcode}\n")
+                    log_file.write(f"Response: {json.dumps(response_json, indent=2)}\n")
+                    log_file.write("-" * 50 + "\n")
                 
                 if response_json.get("msg") == "TIME ERROR." and response_json.get("err_code") == 40007:
                     status = "TIME_ERROR"
@@ -173,20 +338,25 @@ class GiftOperations(commands.Cog):
                 if player_id != "244886619" and status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
                     try:
                         self.cursor.execute("""
-                            INSERT INTO user_giftcodes (fid, giftcode, status)
+                            INSERT OR REPLACE INTO user_giftcodes (fid, giftcode, status)
                             VALUES (?, ?, ?)
                         """, (player_id, giftcode, status))
                         self.conn.commit()
-                        print(f"Saved to database: User {player_id}, Code {giftcode}, Status {status}")
+                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                            log_file.write(f"DATABASE - Updated: User {player_id}, Code {giftcode}, Status {status}\n")
                     except Exception as e:
-                        print(f"Database error: {str(e)}")
+                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                            log_file.write(f"DATABASE ERROR: {str(e)}\n")
+                            log_file.write(f"STACK TRACE: {traceback.format_exc()}\n")
 
                 return status
 
             return "ERROR"
 
         except Exception as e:
-            print(f"Error in claim_giftcode_rewards_wos: {str(e)}")
+            with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                log_file.write(f"ERROR in claim_giftcode_rewards_wos: {str(e)}\n")
+                log_file.write(f"STACK TRACE: {traceback.format_exc()}\n")
             return "ERROR"
 
     @tasks.loop(seconds=300)
@@ -195,9 +365,13 @@ class GiftOperations(commands.Cog):
             self.cursor.execute("SELECT channel_id FROM giftcode_channel")
             channel_ids = [row[0] for row in self.cursor.fetchall()]
 
+            invalid_channels = []
+
             for channel_id in channel_ids:
                 channel = self.bot.get_channel(channel_id)
                 if not channel:
+                    print(f"Warning: Channel {channel_id} not found. It will be removed from database.")
+                    invalid_channels.append(channel_id)
                     continue
 
                 last_reaction_time = None
@@ -380,6 +554,15 @@ class GiftOperations(commands.Cog):
                     except Exception as e:
                         print(f"Error processing gift code {giftcode}: {str(e)}")
                         continue
+
+            if invalid_channels:
+                placeholders = ','.join('?' * len(invalid_channels))
+                self.cursor.execute(f"""
+                    DELETE FROM giftcode_channel 
+                    WHERE channel_id IN ({placeholders})
+                """, invalid_channels)
+                self.conn.commit()
+                print(f"Removed {len(invalid_channels)} invalid channels from database.")
 
             await self.validate_gift_codes()
             
@@ -581,7 +764,7 @@ class GiftOperations(commands.Cog):
                     title="📢 Gift Code Channel Setup",
                     description=(
                         "**Instructions:**\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
                         "Please select a channel for gift codes\n\n"
                         "**Page:** 1/1\n"
                         f"**Total Channels:** {len(select_interaction.guild.text_channels)}"
@@ -1137,10 +1320,61 @@ class GiftOperations(commands.Cog):
         )
 
         view = AllianceSelectView(alliances_with_counts, self)
+        
+        view.current_select.options.insert(0, discord.SelectOption(
+            label="ENABLE ALL ALLIANCES",
+            value="enable_all",
+            description="Enable auto gift code for all alliances",
+            emoji="✅"
+        ))
+        
+        view.current_select.options.insert(1, discord.SelectOption(
+            label="DISABLE ALL ALLIANCES",
+            value="disable_all",
+            description="Disable auto gift code for all alliances",
+            emoji="❌"
+        ))
 
         async def alliance_callback(select_interaction: discord.Interaction):
             try:
-                alliance_id = int(view.current_select.values[0])
+                selected_value = view.current_select.values[0]
+                
+                if selected_value in ["enable_all", "disable_all"]:
+                    status = 1 if selected_value == "enable_all" else 0
+                    
+                    for alliance_id, _, _ in alliances_with_counts:
+                        self.cursor.execute(
+                            """
+                            INSERT INTO giftcodecontrol (alliance_id, status) 
+                            VALUES (?, ?) 
+                            ON CONFLICT(alliance_id) 
+                            DO UPDATE SET status = excluded.status
+                            """,
+                            (alliance_id, status)
+                        )
+                    self.conn.commit()
+
+                    status_text = "enabled" if status == 1 else "disabled"
+                    success_embed = discord.Embed(
+                        title="✅ Auto Gift Code Setting Updated",
+                        description=(
+                            f"**Configuration Details**\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🌐 **Scope:** All Alliances\n"
+                            f"📊 **Status:** Auto gift code {status_text}\n"
+                            f"👤 **Updated by:** {select_interaction.user.mention}\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        ),
+                        color=discord.Color.green()
+                    )
+                    
+                    await select_interaction.response.edit_message(
+                        embed=success_embed,
+                        view=None
+                    )
+                    return
+
+                alliance_id = int(selected_value)
                 alliance_name = next((name for aid, name in available_alliances if aid == alliance_id), "Unknown")
 
                 current_setting = "enabled" if current_status.get(alliance_id, 0) == 1 else "disabled"
@@ -1260,6 +1494,8 @@ class GiftOperations(commands.Cog):
 
     async def use_giftcode_for_alliance(self, alliance_id, giftcode):
         try:
+            operation_counter = 0
+            
             self.alliance_cursor.execute(
                 "SELECT channel_id FROM alliancesettings WHERE alliance_id = ?",
                 (alliance_id,)
@@ -1272,6 +1508,8 @@ class GiftOperations(commands.Cog):
             channel = self.bot.get_channel(channel_id)
             if not channel:
                 return
+
+            await asyncio.sleep(0)
 
             initial_check = await self.claim_giftcode_rewards_wos("244886619", giftcode)
             if initial_check == "USAGE_LIMIT":
@@ -1288,6 +1526,8 @@ class GiftOperations(commands.Cog):
                 )
                 await channel.send(embed=usage_limit_embed)
                 return
+
+            await asyncio.sleep(0)
 
             users_conn = sqlite3.connect('db/users.sqlite')
             users_cursor = users_conn.cursor()
@@ -1322,6 +1562,8 @@ class GiftOperations(commands.Cog):
             )
             status_message = await channel.send(embed=embed)
 
+            await asyncio.sleep(0)
+
             log_file_path = os.path.join(self.log_directory, 'giftlog.txt')
             with open(log_file_path, 'a', encoding='utf-8') as log_file:
                 log_file.write(f"\nGIFT CODE: {giftcode}\n")
@@ -1353,7 +1595,15 @@ class GiftOperations(commands.Cog):
             )
             await status_message.edit(embed=embed)
 
+            await asyncio.sleep(0)
+
+            timeout_retry_users = []
+            
             for member in members:
+                operation_counter += 1
+                if operation_counter % 10 == 0:
+                    await asyncio.sleep(0)
+                
                 player_id = member[0]
                 try:
                     with sqlite3.connect('db/users.sqlite') as users_db:
@@ -1371,35 +1621,33 @@ class GiftOperations(commands.Cog):
                     with open(log_file_path, 'a', encoding='utf-8') as log_file:
                         log_file.write(f"{nickname} - {response_status}\n")
 
-                    if response_status == 429:
-                        embed.description = (
-                            f"**API Rate Limit Detected**\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🎁 **Gift Code:** `{giftcode}`\n"
-                            f"👥 **Total Members:** `{total_members}`\n"
-                            f"✅ **Success:** `{success}`\n"
-                            f"⚠️ **Already Used:** `{received}`\n"
-                            f"❌ **Failed:** `{failed}`\n"
-                            f"⏳ **Progress:** `{processed}/{total_members}`\n"
-                            f"⚠️ **Waiting 60 seconds for API cooldown...**\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                        )
-                        embed.color = discord.Color.orange()
-                        await status_message.edit(embed=embed)
-                        
-                        await asyncio.sleep(60)
-                        
-                        embed.color = discord.Color.blue()
-                        continue
-
-                    processed += 1
-
                     if response_status == "SUCCESS":
                         success += 1
+                        processed += 1
+                        try:
+                            self.cursor.execute("""
+                                INSERT INTO user_giftcodes (fid, giftcode, status)
+                                VALUES (?, ?, ?)
+                            """, (player_id, giftcode, response_status))
+                            self.conn.commit()
+                        except sqlite3.IntegrityError:
+                            pass
                     elif response_status in ["RECEIVED", "SAME TYPE EXCHANGE"]:
                         received += 1
+                        processed += 1
+                        try:
+                            self.cursor.execute("""
+                                INSERT INTO user_giftcodes (fid, giftcode, status)
+                                VALUES (?, ?, ?)
+                            """, (player_id, giftcode, response_status))
+                            self.conn.commit()
+                        except sqlite3.IntegrityError:
+                            pass
+                    elif response_status == "TIMEOUT_RETRY":
+                        timeout_retry_users.append((player_id, nickname))
                     else:
                         failed += 1
+                        processed += 1
 
                     embed.description = (
                         f"**Processing Gift Code**\n"
@@ -1410,6 +1658,7 @@ class GiftOperations(commands.Cog):
                         f"⚠️ **Already Used:** `{received}`\n"
                         f"❌ **Failed:** `{failed}`\n"
                         f"⏳ **Progress:** `{processed}/{total_members}`\n"
+                        f"🔄 **Pending Retry:** `{len(timeout_retry_users)}`\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
                     )
                     await status_message.edit(embed=embed)
@@ -1422,10 +1671,89 @@ class GiftOperations(commands.Cog):
                     processed += 1
                     await status_message.edit(embed=embed)
 
-            with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                log_file.write("-----------------------------\n\n")
+            await asyncio.sleep(0)
 
-            embed.title = "🎁 Auto Gift Code Complete"
+            if timeout_retry_users:
+                embed.description = (
+                    f"**Processing Timeout Retry Users**\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🎁 **Gift Code:** `{giftcode}`\n"
+                    f"👥 **Total Members:** `{total_members}`\n"
+                    f"✅ **Success:** `{success}`\n"
+                    f"⚠️ **Already Used:** `{received}`\n"
+                    f"❌ **Failed:** `{failed}`\n"
+                    f"⏳ **Progress:** `{processed}/{total_members}`\n"
+                    f"🔄 **Pending Retry:** `{len(timeout_retry_users)}`\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                )
+                await status_message.edit(embed=embed)
+
+                for player_id, nickname in timeout_retry_users[:]:
+                    operation_counter += 1
+                    if operation_counter % 10 == 0:
+                        await asyncio.sleep(0)
+                        
+                    while True:
+                        response_status = await self.claim_giftcode_rewards_wos(player_id, giftcode)
+                        
+                        if response_status != "TIMEOUT_RETRY":
+                            if response_status == "SUCCESS":
+                                success += 1
+                                processed += 1
+                                try:
+                                    self.cursor.execute("""
+                                        INSERT OR REPLACE INTO user_giftcodes (fid, giftcode, status)
+                                        VALUES (?, ?, ?)
+                                    """, (player_id, giftcode, response_status))
+                                    self.conn.commit()
+                                except Exception as e:
+                                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                        log_file.write(f"DATABASE ERROR: {str(e)}\n")
+                            elif response_status in ["RECEIVED", "SAME TYPE EXCHANGE"]:
+                                received += 1
+                                processed += 1
+                                try:
+                                    self.cursor.execute("""
+                                        INSERT OR REPLACE INTO user_giftcodes (fid, giftcode, status)
+                                        VALUES (?, ?, ?)
+                                    """, (player_id, giftcode, response_status))
+                                    self.conn.commit()
+                                except Exception as e:
+                                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                                        log_file.write(f"DATABASE ERROR: {str(e)}\n")
+                            else:
+                                failed += 1
+                                processed += 1
+                            
+                            timeout_retry_users.remove((player_id, nickname))
+                            break
+
+                        embed.description = (
+                            f"**Processing Timeout Retry Users**\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🎁 **Gift Code:** `{giftcode}`\n"
+                            f"👥 **Total Members:** `{total_members}`\n"
+                            f"✅ **Success:** `{success}`\n"
+                            f"⚠️ **Already Used:** `{received}`\n"
+                            f"❌ **Failed:** `{failed}`\n"
+                            f"⏳ **Progress:** `{processed}/{total_members}`\n"
+                            f"🔄 **Remaining Retry:** `{len(timeout_retry_users)}`\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        )
+                        await status_message.edit(embed=embed)
+
+            embed.title = "🎁 Gift Code Process Complete"
+            embed.description = (
+                f"**Gift Code Distribution Complete**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎁 **Gift Code:** `{giftcode}`\n"
+                f"👥 **Total Members:** `{total_members}`\n"
+                f"✅ **Success:** `{success}`\n"
+                f"⚠️ **Already Used:** `{received}`\n"
+                f"❌ **Failed:** `{failed}`\n"
+                f"⏳ **Progress:** `{processed}/{total_members}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
             embed.color = discord.Color.green()
             await status_message.edit(embed=embed)
 
@@ -1644,10 +1972,23 @@ class GiftView(discord.ui.View):
             )
 
             view = AllianceSelectView(alliances_with_counts, self.cog)
+            
+            view.current_select.options.insert(0, discord.SelectOption(
+                label="ALL ALLIANCES",
+                value="all",
+                description=f"Apply to all {len(alliances_with_counts)} alliances",
+                emoji="🌐"
+            ))
 
             async def alliance_callback(select_interaction: discord.Interaction):
                 try:
-                    alliance_id = int(view.current_select.values[0])
+                    selected_value = view.current_select.values[0]
+                    
+                    if selected_value == "all":
+                        all_alliances = [aid for aid, name, _ in alliances_with_counts]
+                    else:
+                        alliance_id = int(selected_value)
+                        all_alliances = [alliance_id]
                     
                     self.cog.cursor.execute("""
                         SELECT giftcode, date FROM gift_codes
@@ -1688,7 +2029,6 @@ class GiftView(discord.ui.View):
                     async def giftcode_callback(giftcode_interaction: discord.Interaction):
                         try:
                             selected_code = giftcode_interaction.data["values"][0]
-                            alliance_name = next((name for aid, name in available_alliances if aid == alliance_id), "Unknown")
                             
                             confirm_embed = discord.Embed(
                                 title="⚠️ Confirm Gift Code Usage",
@@ -1696,8 +2036,8 @@ class GiftView(discord.ui.View):
                                     f"Are you sure you want to use this gift code?\n\n"
                                     f"**Details**\n"
                                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"🏰 **Alliance:** {alliance_name}\n"
                                     f"🎁 **Gift Code:** `{selected_code}`\n"
+                                    f"🏰 **Alliances:** {'ALL' if selected_value == 'all' else next((name for aid, name, _ in alliances_with_counts if aid == alliance_id), 'Unknown')}\n"
                                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
                                 ),
                                 color=discord.Color.yellow()
@@ -1708,12 +2048,20 @@ class GiftView(discord.ui.View):
                             async def confirm_callback(button_interaction: discord.Interaction):
                                 try:
                                     await button_interaction.response.edit_message(
-                                        content="Process started! Check alliance channel for progress.",
+                                        content="Process started! Check alliance channels for progress.",
                                         embed=None,
                                         view=None
                                     )
                                     
-                                    await self.cog.use_giftcode_for_alliance(alliance_id, selected_code)
+                                    for aid in all_alliances:
+                                        alliance_name = next((name for a_id, name, _ in alliances_with_counts if a_id == aid), 'Unknown')
+                                        await self.cog.use_giftcode_for_alliance(aid, selected_code)
+                                        await asyncio.sleep(1)
+
+                                    await button_interaction.followup.send(
+                                        f"✅ Gift code process completed for {len(all_alliances)} alliance(s)! Check alliance channels for details.",
+                                        ephemeral=True
+                                    )
 
                                 except Exception as e:
                                     print(f"Error using gift code: {e}")
