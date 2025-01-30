@@ -500,6 +500,12 @@ class Alliance(commands.Cog):
                                  (alliance_id, channel_id, interval))
                     self.conn.commit()
 
+                    self.c_giftcode.execute("""
+                        INSERT INTO giftcodecontrol (alliance_id, status) 
+                        VALUES (?, 1)
+                    """, (alliance_id,))
+                    self.conn_giftcode.commit()
+
                     result_embed = discord.Embed(
                         title="✅ Alliance Successfully Created",
                         description="The alliance has been created with the following details:",
