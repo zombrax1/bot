@@ -102,6 +102,16 @@ class AllianceMemberOperations(commands.Cog):
         self.log_directory = 'log'
         if not os.path.exists(self.log_directory):
             os.makedirs(self.log_directory)
+        self.log_file = os.path.join(self.log_directory, 'alliance_memberlog.txt')
+
+    def log_message(self, message: str):
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = f"[{timestamp}] {message}\n"
+        
+        with open(self.log_file, 'a', encoding='utf-8') as f:
+            f.write(log_entry)
+        
+
 
     def get_fl_emoji(self, fl_level: int) -> str:
         for level_range, emoji in self.fl_emojis.items():
@@ -217,7 +227,7 @@ class AllianceMemberOperations(commands.Cog):
                     )
 
                 except Exception as e:
-                    print(f"Error in add_member_button: {e}")
+                    self.log_message(f"Error in add_member_button: {e}")
                     await button_interaction.response.send_message(
                         "An error occurred while processing your request.", 
                         ephemeral=True
@@ -404,9 +414,9 @@ class AllianceMemberOperations(commands.Cog):
                                                         if alliance_log_channel:
                                                             await alliance_log_channel.send(embed=log_embed)
                                                     except Exception as e:
-                                                        print(f"Alliance Log Sending Error: {e}")
+                                                        self.log_message(f"Alliance Log Sending Error: {e}")
                                         except Exception as e:
-                                            print(f"Log record error: {e}")
+                                            self.log_message(f"Log record error: {e}")
                                         
                                         success_embed = discord.Embed(
                                             title="✅ Members Deleted",
@@ -471,9 +481,9 @@ class AllianceMemberOperations(commands.Cog):
                                                     if alliance_log_channel:
                                                         await alliance_log_channel.send(embed=log_embed)
                                                 except Exception as e:
-                                                    print(f"Alliance Log Sending Error: {e}")
+                                                    self.log_message(f"Alliance Log Sending Error: {e}")
                                     except Exception as e:
-                                        print(f"Log record error: {e}")
+                                        self.log_message(f"Log record error: {e}")
                                     
                                     success_embed = discord.Embed(
                                         title="✅ Member Deleted",
@@ -483,7 +493,7 @@ class AllianceMemberOperations(commands.Cog):
                                     await member_interaction.response.edit_message(embed=success_embed, view=None)
                                     
                                 except Exception as e:
-                                    print(f"Error in member removal: {e}")
+                                    self.log_message(f"Error in member removal: {e}")
                                     await member_interaction.response.send_message(
                                         "❌ An error occurred during member removal.",
                                         ephemeral=True
@@ -503,7 +513,7 @@ class AllianceMemberOperations(commands.Cog):
                     )
 
                 except Exception as e:
-                    print(f"Error in remove_member_button: {e}")
+                    self.log_message(f"Error in remove_member_button: {e}")
                     await button_interaction.response.send_message(
                         "❌ An error occurred during the member deletion process.",
                         ephemeral=True
@@ -665,7 +675,7 @@ class AllianceMemberOperations(commands.Cog):
                     )
 
                 except Exception as e:
-                    print(f"Error in view_members_button: {e}")
+                    self.log_message(f"Error in view_members_button: {e}")
                     if not button_interaction.response.is_done():
                         await button_interaction.response.send_message(
                             "❌ An error occurred while displaying the member list.",
@@ -880,7 +890,7 @@ class AllianceMemberOperations(commands.Cog):
                                         )
                                         
                                     except Exception as e:
-                                        print(f"Transfer error: {e}")
+                                        self.log_message(f"Transfer error: {e}")
                                         error_embed = discord.Embed(
                                             title="❌ Error",
                                             description="An error occurred during the transfer operation.",
@@ -904,7 +914,7 @@ class AllianceMemberOperations(commands.Cog):
                             )
 
                         except Exception as e:
-                            print(f"Source callback error: {e}")
+                            self.log_message(f"Source callback error: {e}")
                             await interaction.response.send_message(
                                 "❌ An error occurred. Please try again.",
                                 ephemeral=True
@@ -918,7 +928,7 @@ class AllianceMemberOperations(commands.Cog):
                     )
 
                 except Exception as e:
-                    print(f"Error in transfer_member_button: {e}")
+                    self.log_message(f"Error in transfer_member_button: {e}")
                     await button_interaction.response.send_message(
                         "❌ An error occurred during the transfer operation.",
                         ephemeral=True
@@ -1025,7 +1035,7 @@ class AllianceMemberOperations(commands.Cog):
                                 )
                                 await button_interaction.response.edit_message(embed=cancel_embed, view=None)
                         except Exception as e:
-                            print(f"Error in button operation: {e}")
+                            self.log_message(f"Error in button operation: {e}")
 
                     
                     for button in confirm_view.children:
@@ -1051,7 +1061,7 @@ class AllianceMemberOperations(commands.Cog):
                         )
                         await member_interaction.response.edit_message(embed=result_embed, view=None)
                     except Exception as e:
-                        print(f"Error in member removal: {e}")
+                        self.log_message(f"Error in member removal: {e}")
 
             member_select.callback = member_select_callback
             await select_interaction.response.edit_message(content=None, view=member_view)
@@ -1166,8 +1176,21 @@ class AllianceMemberOperations(commands.Cog):
                                         with open(log_file_path, 'a', encoding='utf-8') as log_file:
                                             log_file.write(f"ERROR: No data found for FID {fid}\n")
                                         error_count += 1
-                                        error_users.append(fid)
-                                        print("No data found for fid:", fid)
+                                        if fid not in error_users:
+                                            error_users.append(fid)
+                                        with open(self.log_file, 'a', encoding='utf-8') as f:
+                                            f.write(f"[{timestamp}] No data found for fid: {fid}\n")
+                                            f.write(f"[{timestamp}] API Response: {str(data)}\n")
+                                        
+                                        embed.set_field_at(
+                                            1,
+                                            name=f"❌ Failed ({error_count}/{total_users})",
+                                            value="Error list cannot be displayed due to exceeding 70 users" if len(error_users) > 70 
+                                            else ", ".join(error_users) or "-",
+                                            inline=False
+                                        )
+                                        await message.edit(embed=embed)
+                                        index += 1
                                         continue
 
                                     nickname = data['data'].get('nickname')
@@ -1186,8 +1209,11 @@ class AllianceMemberOperations(commands.Cog):
                                                     VALUES (?, ?, ?, ?, ?, ?)
                                                 """, (fid, nickname, furnace_lv, kid, stove_lv_content, alliance_id))
                                                 self.conn_users.commit()
-                                                with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                                    log_file.write(f"SUCCESS: Added member {nickname} (FID: {fid})\n")
+                                                
+                                                with open(self.log_file, 'a', encoding='utf-8') as f:
+                                                    f.write(f"[{timestamp}] Successfully added member - FID: {fid}, Nickname: {nickname}, Level: {furnace_lv}\n")
+                                                    f.write(f"[{timestamp}] API Response: {str(data)}\n")
+                                                
                                                 added_count += 1
                                                 added_users.append((fid, nickname))
                                                 
@@ -1329,8 +1355,8 @@ class AllianceMemberOperations(commands.Cog):
                 is_admin = result is not None
                 return is_admin
         except Exception as e:
-            print(f"Error in admin check: {str(e)}")
-            print(f"Error details:", str(e.__class__.__name__))
+            self.log_message(f"Error in admin check: {str(e)}")
+            self.log_message(f"Error details: {str(e.__class__.__name__)}")
             return False
 
     def cog_unload(self):
@@ -1347,7 +1373,7 @@ class AllianceMemberOperations(commands.Cog):
                 admin_result = cursor.fetchone()
                 
                 if not admin_result:
-                    print(f"User {user_id} is not an admin")
+                    self.log_message(f"User {user_id} is not an admin")
                     return [], [], False
                     
                 is_initial = admin_result[0]
@@ -1425,7 +1451,7 @@ class AllianceMemberOperations(commands.Cog):
                     ephemeral=True
                 )
         except Exception as e:
-            print(f"[ERROR] Main Menu error in member operations: {e}")
+            self.log_message(f"[ERROR] Main Menu error in member operations: {e}")
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     "An error occurred while returning to main menu.", 
@@ -1458,7 +1484,7 @@ class AddMemberModal(discord.ui.Modal):
                 ids
             )
         except Exception as e:
-            print(f"ERROR: Modal submit error - {str(e)}")
+            self.log_message(f"ERROR: Modal submit error - {str(e)}")
             await interaction.response.send_message(
                 "An error occurred. Please try again.", 
                 ephemeral=True
@@ -1549,7 +1575,7 @@ class AllianceSelectView(discord.ui.View):
             )
             await interaction.response.send_modal(modal)
         except Exception as e:
-            print(f"FID button error: {e}")
+            self.log_message(f"FID button error: {e}")
             await interaction.response.send_message(
                 "❌ An error has occurred. Please try again.",
                 ephemeral=True
@@ -1668,7 +1694,7 @@ class FIDSearchModal(discord.ui.Modal):
                         )
                         
                     except Exception as e:
-                        print(f"Transfer error: {e}")
+                        self.log_message(f"Transfer error: {e}")
                         error_embed = discord.Embed(
                             title="❌ Error",
                             description="An error occurred during the transfer operation.",
@@ -1687,7 +1713,7 @@ class FIDSearchModal(discord.ui.Modal):
                 )
 
         except Exception as e:
-            print(f"FID search error: {e}")
+            self.log_message(f"FID search error: {e}")
             print(f"Error details: {str(e.__class__.__name__)}")
             if not interaction.response.is_done():
                 await interaction.response.send_message(
@@ -1785,7 +1811,7 @@ class MemberSelectView(discord.ui.View):
             )
             await interaction.response.send_modal(modal)
         except Exception as e:
-            print(f"FID button error: {e}")
+            self.log_message(f"FID button error: {e}")
             await interaction.response.send_message(
                 "❌ An error has occurred. Please try again.",
                 ephemeral=True
