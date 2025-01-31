@@ -19,6 +19,10 @@ class OtherFeatures(commands.Cog):
                     "└ Not just for Bear! Use it for any event:\n"
                     "   Bear - KE - Forst - CJ and everything else\n"
                     "└ Add unlimited notifications\n\n"
+                    "🆔 **ID Channel**\n"
+                    "└ Create and manage ID channels\n"
+                    "└ Automatic ID verification system\n"
+                    "└ Custom channel settings\n\n"
                     "━━━━━━━━━━━━━━━━━━━━━━"
                 ),
                 color=discord.Color.blue()
@@ -65,6 +69,30 @@ class OtherFeaturesView(discord.ui.View):
             print(f"Error loading Bear Trap menu: {e}")
             await interaction.response.send_message(
                 "❌ An error occurred while loading Bear Trap menu.",
+                ephemeral=True
+            )
+
+    @discord.ui.button(
+        label="ID Channel",
+        emoji="🆔",
+        style=discord.ButtonStyle.primary,
+        custom_id="id_channel",
+        row=0
+    )
+    async def id_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            id_channel_cog = self.cog.bot.get_cog("IDChannel")
+            if id_channel_cog:
+                await id_channel_cog.show_id_channel_menu(interaction)
+            else:
+                await interaction.response.send_message(
+                    "❌ ID Channel module not found.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            print(f"Error loading ID Channel menu: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while loading ID Channel menu.",
                 ephemeral=True
             )
 
