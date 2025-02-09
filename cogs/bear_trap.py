@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytz
 import os
 import asyncio
+import json
 
 class BearTrap(commands.Cog):
     def __init__(self, bot):
@@ -384,8 +385,12 @@ class BearTrap(commands.Cog):
                                         mention_message = embed_data.get("mention_message", "")
                                         if mention_message and "@tag" in mention_message:
                                             mention_message = mention_message.replace("@tag", mention_text)
+                                            mention_message = mention_message.replace("%t", time_text)
+                                            mention_message = mention_message.replace("{time}", time_text)
                                             await channel.send(mention_message)
                                         else:
+                                            mention_text = mention_text.replace("%t", time_text)
+                                            mention_text = mention_text.replace("{time}", time_text)
                                             await channel.send(mention_text)
                                     await channel.send(embed=embed)
                                 else:
@@ -890,6 +895,11 @@ class EmbedEditorView(discord.ui.View):
             if "thumbnail_url" in self.embed_data and self.embed_data["thumbnail_url"]:
                 embed.set_thumbnail(url=self.embed_data["thumbnail_url"])
 
+            mention_preview = self.embed_data.get('mention_message', '@tag')
+            if mention_preview:
+                mention_preview = mention_preview.replace("%t", example_time)
+                mention_preview = mention_preview.replace("{time}", example_time)
+
             content = (
                 "📝 **Embed Editor**\n\n"
                 "**Note:** \n"
@@ -899,7 +909,7 @@ class EmbedEditorView(discord.ui.View):
                 "• Time will automatically show with appropriate units (minutes/hours/days)\n\n"
                 f"Currently showing '{example_time}' as an example.\n\n"
                 f"**Current Mention Message Preview:**\n"
-                f"{self.embed_data.get('mention_message', '@tag') if self.embed_data.get('mention_message') else '@tag'}\n\n"               
+                f"{mention_preview}\n\n"               
             )
 
             if not interaction.response.is_done():
@@ -1125,6 +1135,18 @@ class EmbedEditorView(discord.ui.View):
                 )
             except:
                 pass
+
+    @discord.ui.button(label="Import Embed", style=discord.ButtonStyle.secondary, emoji="📥", row=2)
+    async def import_embed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            modal = ImportEmbedModal(self)
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error showing import modal: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while importing the embed.",
+                ephemeral=True
+            )
 
 class MessageTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone):
@@ -1917,7 +1939,24 @@ class BearTrapView(discord.ui.View):
             options = []
             for notif in notifications:
                 status = "🟢 Enabled" if notif[11] else "🔴 Disabled"
-                display_description = notif[6].split('|')[-1] if '|' in notif[6] else notif[6]
+                
+                if "EMBED_MESSAGE:" in notif[6]:
+                    self.cog.cursor.execute("""
+                        SELECT title, description 
+                        FROM bear_notification_embeds 
+                        WHERE notification_id = ?
+                    """, (notif[0],))
+                    embed_data = self.cog.cursor.fetchone()
+                    
+                    if embed_data and embed_data[0]:
+                        display_description = f"📝 Embed: {embed_data[0]}"
+                    else:
+                        display_description = "📝 Embed Message"
+                else:
+                    display_description = notif[6].split('|')[-1] if '|' in notif[6] else notif[6]
+                    if display_description.startswith("PLAIN_MESSAGE:"):
+                        display_description = display_description.replace("PLAIN_MESSAGE:", "✍️ ")
+
                 options.append(
                     discord.SelectOption(
                         label=f"{notif[3]:02d}:{notif[4]:02d} - {display_description[:30]}",
@@ -1929,6 +1968,8 @@ class BearTrapView(discord.ui.View):
                 placeholder="Select a notification to view details",
                 options=options[:25]
             )
+
+            view = discord.ui.View()
 
             async def select_callback(select_interaction):
                 try:
@@ -2036,12 +2077,36 @@ class BearTrapView(discord.ui.View):
                             if "{time}" in mention_preview:
                                 mention_preview = mention_preview.replace("{time}", example_time)
 
+                        copyable_data = {
+                            'title': embed_data['title'],
+                            'description': embed_data['description'],
+                            'color': embed_data['color'],
+                            'footer': embed_data['footer'],
+                            'author': embed_data['author'],
+                            'image_url': embed_data['image_url'],
+                            'thumbnail_url': embed_data['thumbnail_url'],
+                            'mention_message': embed_data['mention_message']
+                        }
+                        
+                        embed_json = json.dumps(copyable_data, indent=2)
+
+                        view = discord.ui.View()
+                        view.add_item(select)
+
+                        content = "**📋 Notification Details**\n\n"
+                        content += f"**Embed Code:**\n```json\n{embed_json}\n```\n"
+                        if mention_preview:
+                            content += f"**Message Preview:**\n{mention_preview}"
+
                         await select_interaction.response.edit_message(
-                            content="**📋 Notification Details & Preview**\n\n**Message Preview:**" + 
-                                  (f"\n{mention_preview}" if mention_preview else ""),
-                            embeds=[details_embed, preview_embed]
+                            content=content,
+                            embeds=[details_embed, preview_embed],
+                            view=view
                         )
                     else:
+                        view = discord.ui.View()
+                        view.add_item(select)
+                        
                         message_preview = None
                         if "PLAIN_MESSAGE:" in selected_notif[6]:
                             message_preview = selected_notif[6].replace("PLAIN_MESSAGE:", "")
@@ -2049,18 +2114,18 @@ class BearTrapView(discord.ui.View):
                         await select_interaction.response.edit_message(
                             content="**📋 Notification Details**" + 
                                   (f"\n\n**Message Preview:**\n{message_preview}" if message_preview else ""),
-                            embed=details_embed
+                            embed=details_embed,
+                            view=view
                         )
-                    
+
                 except Exception as e:
-                    print(f"Error in view notification callback: {e}")
+                    print(f"Error in select callback: {e}")
                     await select_interaction.response.send_message(
-                        "❌ An error occurred while viewing notification details.",
+                        "❌ An error occurred while processing your selection.",
                         ephemeral=True
                     )
 
             select.callback = select_callback
-            view = discord.ui.View()
             view.add_item(select)
             
             await interaction.response.send_message(
@@ -2186,7 +2251,17 @@ class ChannelSelectMenu(discord.ui.ChannelSelect):
         self.parent_view = view
         super().__init__(
             placeholder="Select a channel for notifications",
-            channel_types=[discord.ChannelType.text],
+            channel_types=[
+                discord.ChannelType.text,
+                discord.ChannelType.private,
+                discord.ChannelType.news,
+                discord.ChannelType.forum,
+                discord.ChannelType.news_thread,
+                discord.ChannelType.public_thread,
+                discord.ChannelType.private_thread,
+                discord.ChannelType.stage_voice,
+                discord.ChannelType.media
+            ],
             min_values=1,
             max_values=1
         )
@@ -2257,6 +2332,61 @@ class ChannelSelectMenu(discord.ui.ChannelSelect):
                     "❌ An error occurred while processing your selection!",
                     ephemeral=True
                 )
+
+class ImportEmbedModal(discord.ui.Modal):
+    def __init__(self, embed_view):
+        super().__init__(title="Import Embed")
+        self.embed_view = embed_view
+        
+        self.embed_code = discord.ui.TextInput(
+            label="Embed Code",
+            placeholder="Paste the embed code here...",
+            style=discord.TextStyle.paragraph,
+            required=True
+        )
+        self.add_item(self.embed_code)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            embed_data = json.loads(self.embed_code.value)
+            
+            self.embed_view.embed_data.update({
+                'title': embed_data.get('title') or '',
+                'description': embed_data.get('description') or '',
+                'color': embed_data.get('color', discord.Color.blue().value),
+                'footer': embed_data.get('footer') or '',
+                'author': embed_data.get('author') or '',
+                'image_url': embed_data.get('image_url') or '',
+                'thumbnail_url': embed_data.get('thumbnail_url') or '',
+                'mention_message': embed_data.get('mention_message') or '@tag'
+            })
+            
+            await self.embed_view.update_embed(interaction)
+            await interaction.followup.send(
+                "✅ Embed imported successfully!",
+                ephemeral=True
+            )
+            
+        except json.JSONDecodeError:
+            await interaction.response.send_message(
+                "❌ Invalid embed code format. Please make sure you copied the entire code correctly.",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"Error importing embed: {e}")
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "❌ An error occurred while importing the embed.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "❌ An error occurred while importing the embed.",
+                        ephemeral=True
+                    )
+            except:
+                pass
 
 async def setup(bot):
     await bot.add_cog(BearTrap(bot)) 
