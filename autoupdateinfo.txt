@@ -1,6 +1,6 @@
 Version= V4.0
 Documants;
-main.py = V4.4
+main.py = V4.5
 cogs/alliance.py = V4.2
 cogs/alliance_member_operations.py = V4.4
 cogs/bot_operations.py = V4.2
@@ -17,6 +17,7 @@ cogs/bear_trap.py = V4.2
 cogs/id_channel.py = V4.0
 
 Updated Info;
+- In the absence of Github access, updates will now be checked extra on our site wosland.com
 - You will now be able to copy the EMBEDs you created for notifications and paste them when creating an embed
 - Fixed the issue where the remaining time was not displayed when you type %t while creating and sending a Mention Message in Embed Message. 
 - Fixed some channels not appearing when selecting channels when setting notifications
