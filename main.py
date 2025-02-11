@@ -84,10 +84,23 @@ if __name__ == "__main__":
 
     async def check_and_update_files():
         try:
-            response = requests.get(VERSION_URL)
-            if response.status_code != 200:
-                print(Fore.RED + "Failed to fetch version information from GitHub" + Style.RESET_ALL)
-                return False
+            try:
+                response = requests.get(VERSION_URL)
+                if response.status_code == 200:
+                    source_url = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main"
+                    print(Fore.GREEN + "Connected to GitHub successfully." + Style.RESET_ALL)
+                else:
+                    raise requests.RequestException
+            except requests.RequestException:
+                print(Fore.YELLOW + "Cannot connect to GitHub, trying alternative source (wosland.com)..." + Style.RESET_ALL)
+                alt_version_url = "https://wosland.com/wosdc/autoupdateinfo.txt"
+                response = requests.get(alt_version_url)
+                if response.status_code == 200:
+                    source_url = "https://wosland.com/wosdc"
+                    print(Fore.GREEN + "Connected to wosland.com successfully." + Style.RESET_ALL)
+                else:
+                    print(Fore.RED + "Failed to connect to both GitHub and wosland.com" + Style.RESET_ALL)
+                    return False
 
             if not os.path.exists('cogs'):
                 os.makedirs('cogs')
@@ -157,7 +170,7 @@ if __name__ == "__main__":
                         
                         for file_name, new_version in updates_needed:
                             if file_name.strip() != 'main.py':
-                                file_url = f"https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/{file_name}"
+                                file_url = f"{source_url}/{file_name}"
                                 file_response = requests.get(file_url)
                                 
                                 if file_response.status_code == 200:
@@ -172,7 +185,7 @@ if __name__ == "__main__":
                                     """, (file_name, new_version, 0))
 
                         if main_py_updated:
-                            main_file_url = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/main.py"
+                            main_file_url = f"{source_url}/main.py"
                             main_response = requests.get(main_file_url)
                             
                             if main_response.status_code == 200:
