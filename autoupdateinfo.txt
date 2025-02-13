@@ -16,7 +16,7 @@ cogs/control.py = V4.2
 cogs/bear_trap.py = V4.2
 cogs/id_channel.py = V4.0
 cogs/backup_operations.py = V4.0
-cogs/gift_operationsapi = V4.0
+cogs/gift_operationsapi.py = V4.0
 
 Updated Info;
 - main.py: Integrated zip module for database backup functionality
