@@ -12,6 +12,7 @@ import tempfile
 import shutil
 import pyzipper
 import traceback
+import ssl
 
 class BackupOperations(commands.Cog):
     def __init__(self, bot):
@@ -19,6 +20,8 @@ class BackupOperations(commands.Cog):
         self.db_path = "db/backup.sqlite"
         self.api_url = "https://wosland.com/apidc/backup_api/backup_api.php"
         self.api_key = "serioyun_backup_api_key_2024"
+        self.log_path = "log/backuplog.txt"
+        os.makedirs("log", exist_ok=True)
         self.setup_database()
         self.automatic_backup_loop.start()
 
@@ -41,6 +44,25 @@ class BackupOperations(commands.Cog):
     def cog_unload(self):
         self.automatic_backup_loop.cancel()
 
+    def log_backup(self, admin_id: str, success: bool, backup_type: str, backup_url: str = None, error_message: str = None):
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            log_message = f"[{timestamp}] "
+            log_message += f"Type: {backup_type} | "
+            log_message += f"Admin ID: {admin_id} | "
+            log_message += f"Status: {'✅ Success' if success else '❌ Failed'}"
+            if backup_url:
+                log_message += f" | Download Link: {backup_url}"
+            if error_message:
+                log_message += f" | Error: {error_message}"
+            log_message += "\n"
+            log_message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+            with open(self.log_path, 'a', encoding='utf-8') as log_file:
+                log_file.write(log_message)
+        except Exception as e:
+            print(f"Logging error: {e}")
+
     @tasks.loop(hours=3)
     async def automatic_backup_loop(self):
         try:
@@ -52,26 +74,14 @@ class BackupOperations(commands.Cog):
 
             for admin_id in global_admins:
                 admin_id = admin_id[0]
-                backup_url = await self.create_backup(admin_id)
-                if backup_url:
-                    user = await self.bot.fetch_user(int(admin_id))
-                    if user:
-                        embed = discord.Embed(
-                            title="🔄 Automatic Backup",
-                            description="Backup created successfully!",
-                            color=discord.Color.green()
-                        )
-                        embed.add_field(
-                            name="📥 Download Link",
-                            value=backup_url,
-                            inline=False
-                        )
-                        embed.add_field(
-                            name="🔐 File Password",
-                            value="Backup menu password",
-                            inline=False
-                        )
-                        await user.send(embed=embed)
+                try:
+                    backup_url = await self.create_backup(admin_id)
+                    if backup_url:
+                        self.log_backup(admin_id, True, "Automatic Backup", backup_url)
+                    else:
+                        self.log_backup(admin_id, False, "Automatic Backup", None, "Backup creation failed")
+                except Exception as e:
+                    self.log_backup(admin_id, False, "Automatic Backup", None, str(e))
 
         except Exception as e:
             print(f"Automatic backup error: {e}")
@@ -79,6 +89,26 @@ class BackupOperations(commands.Cog):
     @automatic_backup_loop.before_loop
     async def before_automatic_backup(self):
         await self.bot.wait_until_ready()
+        try:
+            conn = sqlite3.connect("db/settings.sqlite")
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM admin WHERE is_initial = 1")
+            global_admins = cursor.fetchall()
+            conn.close()
+
+            for admin_id in global_admins:
+                admin_id = admin_id[0]
+                try:
+                    backup_url = await self.create_backup(admin_id)
+                    if backup_url:
+                        self.log_backup(admin_id, True, "Startup Backup", backup_url)
+                    else:
+                        self.log_backup(admin_id, False, "Startup Backup", None, "Backup creation failed")
+                except Exception as e:
+                    self.log_backup(admin_id, False, "Startup Backup", None, str(e))
+
+        except Exception as e:
+            print(f"Startup backup error: {e}")
 
     async def is_global_admin(self, discord_id):
         conn = sqlite3.connect("db/settings.sqlite")
@@ -183,7 +213,11 @@ Thank you for using our bot! ❤️
                     print(f"Backup file size exceeds 2MB limit for user {user_id}")
                     return None
 
-                async with aiohttp.ClientSession() as session:
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                     with open(secured_zip, 'rb') as f:
                         data = aiohttp.FormData()
                         data.add_field('file', f)
@@ -205,11 +239,16 @@ Thank you for using our bot! ❤️
 
         except Exception as e:
             print(f"Backup creation error: {e}")
+            traceback.print_exc()
             return None
 
     async def get_backup_list(self, user_id: str):
         try:
-            async with aiohttp.ClientSession() as session:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 headers = {'X-API-Key': self.api_key}
                 params = {'discord_id': user_id, 'action': 'list'}
                 async with session.get(self.api_url, params=params, headers=headers) as response:
@@ -300,7 +339,7 @@ class BackupView(discord.ui.View):
             )
             embed.add_field(
                 name="📥 Download Link",
-                value=backup_url,
+                value=f"[Click here to download]({backup_url})",
                 inline=False
             )
             embed.add_field(
@@ -308,6 +347,7 @@ class BackupView(discord.ui.View):
                 value="Use your backup password",
                 inline=False
             )
+            self.cog.log_backup(str(interaction.user.id), True, "Manual Backup", backup_url)
             await interaction.followup.send(embed=embed, ephemeral=True)
         else:
             conn = sqlite3.connect(self.cog.db_path)
@@ -320,11 +360,15 @@ class BackupView(discord.ui.View):
                 title="❌ Backup Error",
                 color=discord.Color.red()
             )
+            error_message = ""
             if not has_password:
+                error_message = "Please set a backup password first"
                 embed.description = "Failed to create backup! Please set a backup password first."
             else:
+                error_message = "Backup file size exceeds 2MB limit"
                 embed.description = "Failed to create backup! Backup file size exceeds 2MB limit."
 
+            self.cog.log_backup(str(interaction.user.id), False, "Manual Backup", None, error_message)
             await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Main Menu", emoji="🏠", style=discord.ButtonStyle.secondary, row=1)
@@ -424,7 +468,7 @@ class BackupListView(discord.ui.View):
                 url = f"{backup['url']}&api_key={self.cog.api_key}"
                 embed.add_field(
                     name=f"⏰ {backup['timestamp'].split()[1]}",
-                    value=f"🔗 [Download]({url})\n🔐 Password: Use your backup password",
+                    value=f"🔗 [Click here to download]({url})\n🔐 Password: Use your backup password",
                     inline=False
                 )
             backup_pages.append(embed)
