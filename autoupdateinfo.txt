@@ -15,17 +15,10 @@ cogs/wel.py = V4.1
 cogs/control.py = V4.2
 cogs/bear_trap.py = V4.2
 cogs/id_channel.py = V4.0
-cogs/backup_operations.py = V4.0
+cogs/backup_operations.py = V4.1
 cogs/gift_operationsapi.py = V4.0
 
 Updated Info;
-- main.py: Integrated zip module for database backup functionality
-- bot_operations.py: Fixed embed display issue when update notes are too long
-- control.py: Fixed alliance check congestion issue when bot first starts up
-- control.py: Alliance checks will now be performed with 1-minute intervals to prevent concurrent execution conflicts
-- gift_operations.py: Integrated API system to fetch new gift codes from a shared database
-- gift_operations.py: Fixed issue with simultaneous gift code usage across multiple alliances
-- gift_operations.py: Will now wait for gift code usage to complete for one alliance before starting another
-- alliance.py: Added manual alliance control feature, you can now initiate manual checks for your alliance
-- other_features.py: Added Backup Menu (Global Admin access only)
-- backup_operations.py: Databases will now be automatically backed up and can only be accessed with your custom password
+- backup_operations.py: No more annoying automatic backup messages
+- backup_operations.py: Backup records are kept in the log folder
+- backup_operations.py: SSL issue fixed
