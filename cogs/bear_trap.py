@@ -6,6 +6,8 @@ import pytz
 import os
 import asyncio
 import json
+import urllib.parse
+import traceback
 
 class BearTrap(commands.Cog):
     def __init__(self, bot):
@@ -1754,8 +1756,93 @@ class BearTrapView(discord.ui.View):
     async def set_time_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.cog.check_admin(interaction):
             return
-        modal = TimeSelectModal(self.cog)
-        await interaction.response.send_modal(modal)
+
+        try:            
+            embed = discord.Embed(
+                title="⏰ Notification Creation Method",
+                description=(
+                    "Please select how you want to create the notification:\n\n"
+                    "**⚙️ Create in Discord**\n"
+                    "• For simple notifications\n"
+                    "• Quick setup\n"
+                    "• Basic features\n\n"
+                    "**🌐 Create on Website (Recommended)**\n"
+                    "• For advanced notifications\n"
+                    "• Customizable embeds\n"
+                    "• Rich text formatting\n"
+                    "• Custom color selection\n"
+                    "• Add images and thumbnails\n"
+                    "• Footer and author fields"
+                ),
+                color=discord.Color.blue()
+            )
+
+            view = discord.ui.View(timeout=300)
+
+            discord_button = discord.ui.Button(
+                label="Create in Discord",
+                emoji="⚙️",
+                style=discord.ButtonStyle.primary,
+                custom_id="create_in_discord"
+            )
+
+            async def discord_button_callback(discord_interaction):
+                modal = TimeSelectModal(self.cog)
+                await discord_interaction.response.send_modal(modal)
+
+            discord_button.callback = discord_button_callback
+
+            web_button = discord.ui.Button(
+                label="Create on Website",
+                emoji="🌐", 
+                style=discord.ButtonStyle.success,
+                custom_id="create_in_web"
+            )
+
+            async def web_button_callback(web_interaction):
+                try:
+                    editor_cog = self.cog.bot.get_cog('BearTrapEditor')
+                    if not editor_cog:
+                        await web_interaction.response.send_message(
+                            "❌ BearTrapEditor module not found!",
+                            ephemeral=True
+                        )
+                        return
+
+                    view = editor_cog.TimeSelectOptionsView(editor_cog)
+                    await view.start_setup(web_interaction)
+
+                except Exception as e:
+                    print(f"Error in web button: {e}")
+                    await web_interaction.response.send_message(
+                        "❌ An error occurred while starting the website process!",
+                        ephemeral=True
+                    )
+
+            web_button.callback = web_button_callback
+
+            view.add_item(discord_button)
+            view.add_item(web_button)
+
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+        except Exception as e:
+            error_msg = f"[ERROR] Error in set time button: {str(e)}\nType: {type(e)}\nTrace: {traceback.format_exc()}"
+            print(error_msg)
+            
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "❌ An error occurred!",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "❌ An error occurred!",
+                        ephemeral=True
+                    )
+            except Exception as notify_error:
+                print(f"[ERROR] Failed to notify user about error: {notify_error}")
 
     @discord.ui.button(
         label="Remove Notification",
@@ -2230,6 +2317,94 @@ class BearTrapView(discord.ui.View):
             print(f"Error returning to main menu: {e}")
             await interaction.response.send_message(
                 "❌ An error occurred while returning to main menu.",
+                ephemeral=True
+            )
+
+    @discord.ui.button(
+        label="Edit",
+        emoji="✏️",
+        style=discord.ButtonStyle.primary,
+        custom_id="edit_notification",
+        row=1
+    )
+    async def edit_notification_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.cog.check_admin(interaction):
+            return
+        try:
+            notifications = await self.cog.get_notifications(interaction.guild_id)
+            if not notifications:
+                await interaction.response.send_message(
+                    "❌ No notifications found to edit in this server.",
+                    ephemeral=True
+                )
+                return
+
+            options = []
+            for notif in notifications:
+                status = "🟢 Enabled" if notif[11] else "🔴 Disabled"
+                
+                if "EMBED_MESSAGE:" in notif[6]:
+                    self.cog.cursor.execute("""
+                        SELECT title, description 
+                        FROM bear_notification_embeds 
+                        WHERE notification_id = ?
+                    """, (notif[0],))
+                    embed_data = self.cog.cursor.fetchone()
+                    
+                    if embed_data and embed_data[0]:
+                        display_description = f"📝 Embed: {embed_data[0]}"
+                    else:
+                        display_description = "📝 Embed Message"
+                else:
+                    display_description = notif[6].split('|')[-1] if '|' in notif[6] else notif[6]
+                    if display_description.startswith("PLAIN_MESSAGE:"):
+                        display_description = display_description.replace("PLAIN_MESSAGE:", "✍️ ")
+
+                options.append(
+                    discord.SelectOption(
+                        label=f"{notif[3]:02d}:{notif[4]:02d} - {display_description[:30]}",
+                        description=f"ID: {notif[0]} | {status}",
+                        value=str(notif[0])
+                    )
+                )
+
+            select = discord.ui.Select(
+                placeholder="Select a notification to edit",
+                options=options[:25]
+            )
+
+            async def select_callback(select_interaction):
+                try:
+                    notification_id = int(select_interaction.data["values"][0])
+                    editor_cog = self.cog.bot.get_cog('BearTrapEditor')
+                    if editor_cog:
+                        await editor_cog.start_edit_process(select_interaction, notification_id)
+                    else:
+                        await select_interaction.response.send_message(
+                            "❌ Editor module not found!",
+                            ephemeral=True
+                        )
+                except Exception as e:
+                    print(f"Error in edit notification callback: {e}")
+                    await select_interaction.response.send_message(
+                        "❌ An error occurred during editing!",
+                        ephemeral=True
+                    )
+
+            select.callback = select_callback
+            view = discord.ui.View()
+            view.add_item(select)
+            
+            await interaction.response.send_message(
+                "Select the notification you want to edit:",
+                view=view,
+                ephemeral=True
+            )
+
+        except Exception as e:
+            print(f"Error in edit button: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while starting the edit process!",
                 ephemeral=True
             )
 
