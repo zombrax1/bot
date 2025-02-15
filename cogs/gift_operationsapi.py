@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 import traceback
 import discord
+import ssl
 
 class GiftCodeAPI:
     def __init__(self, bot):
@@ -27,6 +28,10 @@ class GiftCodeAPI:
         
         self.users_conn = sqlite3.connect('db/users.sqlite')
         self.users_cursor = self.users_conn.cursor()
+        
+        self.ssl_context = ssl.create_default_context()
+        self.ssl_context.check_hostname = False
+        self.ssl_context.verify_mode = ssl.CERT_NONE
         
         asyncio.create_task(self.start_api_check())
 
@@ -54,7 +59,8 @@ class GiftCodeAPI:
             self.cursor.execute("SELECT giftcode, date FROM gift_codes")
             db_codes = {row[0]: row[1] for row in self.cursor.fetchall()}
             
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 headers = {
                     'X-API-Key': self.api_key,
                     'Content-Type': 'application/json'
@@ -207,7 +213,8 @@ class GiftCodeAPI:
             if result:
                 return False
 
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 headers = {
                     'Content-Type': 'application/json',
                     'X-API-Key': self.api_key
@@ -239,7 +246,8 @@ class GiftCodeAPI:
             if not from_validation:
                 return False
 
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 headers = {
                     'Content-Type': 'application/json',
                     'X-API-Key': self.api_key
@@ -271,7 +279,8 @@ class GiftCodeAPI:
             
     async def check_giftcode(self, giftcode: str) -> bool:
         try:
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(f"{self.api_url}?action=check&giftcode={giftcode}") as response:
                     if response.status == 200:
                         result = await response.json()
