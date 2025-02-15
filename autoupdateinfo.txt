@@ -13,12 +13,12 @@ cogs/support_operations.py = V4.0
 cogs/w.py = V4.0
 cogs/wel.py = V4.1
 cogs/control.py = V4.2
-cogs/bear_trap.py = V4.2
+cogs/bear_trap.py = V4.3
 cogs/id_channel.py = V4.0
 cogs/backup_operations.py = V4.1
-cogs/gift_operationsapi.py = V4.0
+cogs/gift_operationsapi.py = V4.1
+cogs/bear_trap_editor.py = V4.0
 
 Updated Info;
-- backup_operations.py: No more annoying automatic backup messages
-- backup_operations.py: Backup records are kept in the log folder
-- backup_operations.py: SSL issue fixed
+- gift_operationsapi.py: SSL disabled due to SSL issue
+- bear_trap.py: Now embed editing and creation via web panel is enabled.
