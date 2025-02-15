@@ -1,6 +1,6 @@
 Version= V4.6
 Documants;
-main.py = V4.6
+main.py = V4.7
 cogs/alliance.py = V4.3
 cogs/alliance_member_operations.py = V4.4
 cogs/bot_operations.py = V4.3
