@@ -349,6 +349,7 @@ if __name__ == "__main__":
         await bot.load_extension("cogs.bear_trap")
         await bot.load_extension("cogs.id_channel")
         await bot.load_extension("cogs.backup_operations")
+        await bot.load_extension("cogs.bear_trap_editor")
 
     @bot.event
     async def on_ready():
