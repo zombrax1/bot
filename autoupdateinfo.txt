@@ -13,11 +13,13 @@ cogs/support_operations.py = V4.0
 cogs/w.py = V4.0
 cogs/wel.py = V4.1
 cogs/control.py = V4.2
-cogs/bear_trap.py = V4.3
+cogs/bear_trap.py = V4.4
 cogs/id_channel.py = V4.0
 cogs/backup_operations.py = V4.1
 cogs/gift_operationsapi.py = V4.2
-cogs/bear_trap_editor.py = V4.0
+cogs/bear_trap_editor.py = V4.1
 
 Updated Info;
 - Annoying NoneType that keeps popping up on the console: None error has been fixed
+- Fixed forum type channels not showing up when editing Notification.
+- Fixed media error when creating Notification
