@@ -261,7 +261,10 @@ class BearTrap(commands.Cog):
             elif notification_type == 6:  
                 if description.startswith("CUSTOM_TIMES:"):
                     times_str = description.split("CUSTOM_TIMES:")[1].split("|")[0]
-                    notification_times = [int(t) for t in times_str.split('-')]
+                    if ',' in times_str:
+                        notification_times = [int(t.strip()) for t in times_str.split(',')]
+                    else:
+                        notification_times = [int(t.strip()) for t in times_str.split('-')]
                     description = description.split("|")[1]
 
             should_notify = False
@@ -2434,7 +2437,8 @@ class ChannelSelectMenu(discord.ui.ChannelSelect):
                 discord.ChannelType.news_thread,
                 discord.ChannelType.public_thread,
                 discord.ChannelType.private_thread,
-                discord.ChannelType.stage_voice
+                discord.ChannelType.stage_voice,
+                discord.ChannelType.media
             ],
             min_values=1,
             max_values=1
