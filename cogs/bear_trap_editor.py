@@ -267,7 +267,18 @@ class ChannelMentionSelectView(discord.ui.View):
         
         self.channel_select = discord.ui.ChannelSelect(
             placeholder="Select channel...",
-            channel_types=[discord.ChannelType.text]
+            channel_types=[
+                discord.ChannelType.text,
+                discord.ChannelType.private,
+                discord.ChannelType.news,
+                discord.ChannelType.forum,
+                discord.ChannelType.news_thread,
+                discord.ChannelType.public_thread,
+                discord.ChannelType.private_thread,
+                discord.ChannelType.stage_voice
+            ],
+            min_values=1,
+            max_values=1
         )
         self.channel_select.callback = self.channel_select_callback
         self.add_item(self.channel_select)
