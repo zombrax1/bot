@@ -131,6 +131,9 @@ class GiftCodeAPI:
                             try:
                                 self.conn.commit()
 
+                                if not new_codes:
+                                    return True
+
                                 for code, formatted_date in new_codes:
                                     try:
                                         self.cursor.execute("SELECT alliance_id FROM giftcodecontrol WHERE status = 1")
