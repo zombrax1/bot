@@ -115,12 +115,10 @@ class GiftOperations(commands.Cog):
                 return
 
             try:
-                print(f"Gift Code Channel'da mesaj alındı, kontroller başlatılıyor...")
                 await self.api.validate_and_clean_giftcode_file()
                 await self.api.sync_with_api()
-                print("Gift Code Channel kontrolleri tamamlandı.")
             except Exception as e:
-                print(f"Gift Code Channel kontrollerinde hata: {str(e)}")
+                print(f"Error in Gift Code Channel controls: {str(e)}")
 
             content = message.content.strip()
             if not content:
