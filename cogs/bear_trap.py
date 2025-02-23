@@ -2437,8 +2437,7 @@ class ChannelSelectMenu(discord.ui.ChannelSelect):
                 discord.ChannelType.news_thread,
                 discord.ChannelType.public_thread,
                 discord.ChannelType.private_thread,
-                discord.ChannelType.stage_voice,
-                discord.ChannelType.media
+                discord.ChannelType.stage_voice
             ],
             min_values=1,
             max_values=1
