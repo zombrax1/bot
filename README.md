@@ -1,4 +1,76 @@
 
+# V4 Mass Update List (25.02.2025)
+
+Since the release of V4, we've implemented numerous changes and improvements. Here's a comprehensive overview of the latest updates:
+
+## 🛠️ Bug Fixes & Improvements
+- 90% of reported issues on Discord have been resolved
+- Continuous maintenance and bug fixing
+- Implementing user-requested custom features
+
+## 🎁 Gift Code System
+- Introduced new Gift Code API system
+- Shared gift code database for easier management
+- Automatic expired code cleanup
+- Alliance auto-gift code usage feature
+  - Automatically detects and applies codes for all members
+  - Customizable periodic alliance checks
+
+## 📢 Notification System
+- Unlimited custom notifications
+- Flexible timing configuration
+- Multiple notification intervals
+- Example scenario:
+  ```
+  Event time: 18:00 UTC
+  Notifications at:
+  - 17:40 (20 minutes before)
+  - 17:50 (10 minutes before)
+  - 17:55 (5 minutes before)
+  - 18:00 (Event start)
+  ```
+- Web interface for notification management
+  - Visit: [wosland.com/notification](https://wosland.com/notification)
+
+## 💾 Backup System
+- Automatic database backup
+- Secure encrypted backups (.zip format)
+- Personal encryption key system
+- Private backup link generation
+- Enhanced data privacy
+  - Only member IDs are stored
+  - Encrypted access
+
+## 🆔 ID Channel System
+- Automatic alliance member addition
+- Discord channel integration
+- Duplicate entry prevention
+- Comprehensive logging system
+
+## ⚙️ Additional Features
+- Alliance Control Messages toggle in Bot Operations menu
+- Customizable progress notifications
+- Enhanced user experience
+
+## 🌟 Support & Community
+Join our Discord community for:
+- Direct support
+- Feature requests
+- Updates and announcements
+- [Join Discord Server](https://discord.gg/h8w6N6my4a)
+
+## 🔄 Ongoing Development
+We continue to:
+- Implement user feedback
+- Fix reported issues
+- Add new features
+- Improve system stability
+
+Have a great day! 
+
+---
+*For more information and support, visit our [Discord Server](https://discord.gg/h8w6N6my4a)*
+
 # V4 UPDATED
 
 - Let's talk a little bit about V4
