@@ -57,7 +57,7 @@ class GiftOperations(commands.Cog):
         self.wos_encrypt_key = "tB87#kPtkxqOS2"
         
         self.retry_config = Retry(
-            total=5,
+            total=20,
             backoff_factor=1,
             status_forcelist=[429],
             allowed_methods=["POST"]
