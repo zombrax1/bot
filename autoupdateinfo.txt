@@ -5,7 +5,7 @@ cogs/alliance.py = V4.3
 cogs/alliance_member_operations.py = V4.4
 cogs/bot_operations.py = V4.3
 cogs/changes.py = V4.0
-cogs/gift_operations.py = V4.7
+cogs/gift_operations.py = V4.8
 cogs/logsystem.py = V4.1
 cogs/olddb.py = V4.2
 cogs/other_features.py = V4.3
@@ -20,6 +20,4 @@ cogs/gift_operationsapi.py = V4.2
 cogs/bear_trap_editor.py = V4.1
 
 Updated Info;
-- Annoying NoneType that keeps popping up on the console: None error has been fixed
-- Fixed forum type channels not showing up when editing Notification.
-- Fixed media error when creating Notification
+- Increased the number of retries from 5 to 20 when redeeming a gift code for one person (after 5 attempts, it was registering as Failed, now it will try 20 times)
