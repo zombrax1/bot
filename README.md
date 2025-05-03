@@ -6,9 +6,27 @@ Please note that until Relo is able to pull the code into the main repository, o
 
 **IMPORTANT:** Before proceeding, it is crucial to back up your bot's data to prevent loss in case anything goes wrong.
 
+## ⚠️ Important Note: OCR Requirements (EasyOCR)
+
+This patch uses EasyOCR (which depends on PyTorch) for captcha solving. EasyOCR is **resource-intensive** and requires:
+
+- **5GB+ of disk space**
+- **Modern CPU** with AVX / AVX2 instruction set support
+- Optional: **GPU** with CUDA support for faster OCR
+
+If your CPU does not support AVX instructions, PyTorch will fail with `Illegal instruction` errors and the bot will not start. See the known issues section below.
+
 ---
 
-## Prerequisites
+## 🖥️ System Requirements & Prerequisites
+
+| Component     | Minimum                        | Recommended                      |
+|---------------|--------------------------------|----------------------------------|
+| CPU           | x86 with AVX support (2011+)   | Modern quad-core or better       |
+| Memory        | 1 GB free RAM                  | 2+ GB for smoother operation     |
+| Disk Space    | 5 GB+ (EasyOCR + models)       | SSD for faster OCR performance   |
+| Python        | 3.9+                           | 3.10 (64-bit recommended)        |
+| Optional GPU  | CUDA-compatible GPU (NVIDIA)   | Required for GPU OCR             |
 
 *   An existing, functional installation of the [Whiteout Survival Discord Bot](https://github.com/Reloisback/Whiteout-Survival-Discord-Bot).
 *   Access to the server or machine where the bot is running.
@@ -63,9 +81,10 @@ Please note that until Relo is able to pull the code into the main repository, o
     *   Check the bot's console output for any errors during startup, especially related to `GiftOperations` or `GiftCaptchaSolver`. Look for messages indicating whether the solver initialized successfully (and if it's using CPU or GPU).
     *   Once the bot is online, try using the `/settings` command (or equivalent) and navigate to the Gift Code Operations menu to ensure it loads correctly.
     *   Test redeeming some gift codes. It should be working, although it may take longer than before.
+
 ---
 
-## Post-Installation
+## 🧹 Post-Installation
 
 *   The CAPTCHA solver should now be active (using CPU by default). It has approximately 70% accuracy at the moment. Improvements are being worked on, but it works for now.
 *   In case any IDs end up with an Error result, you can always re-run the redemption for the same gift code and alliance again to hopefully redeem it successfully this time.
@@ -75,3 +94,41 @@ Please note that until Relo is able to pull the code into the main repository, o
 If you encounter issues with this patch, please contact Yolo - Discord id: `yoloblaster`.
 
 You can find the original readme [here](https://github.com/Reloisback/Whiteout-Survival-Discord-Bot/blob/main/README.md).
+
+---
+
+## 🛠️ Patch Notes – Version 1.0.5
+
+- ✅ Improved CAPTCHA handling:
+  - The gift code redemption process no longer fails when a `CAPTCHA_INVALID` response is received.
+  - OCR is now retried up to **4 times** before giving up, increasing the success rate.
+  - Progress of captcha attempts is now reflected in the Discord embed during gift code creation.
+  
+- ♻️ Improved robustness of the gift code channel monitoring:
+  - If 4 redemption attempts fail, a ⏳ emoji is added, and the system retries in the next cycle.
+
+- 🧹 Bug Fixes & Maintenance:
+  - Fixed an error when saving all OCR images (previously required turning off image saving to avoid crash).
+  - Reduced frequency of periodic gift code revalidation from every 5 minutes to **every 30 minutes** to reduce system load.
+  - Final status update in the result embed is now always shown after redemption completes.
+  - Switched `giftlog.txt` to use a proper logger with **log rotation** (3MB max, 3 backups).
+  - Gift Code Operations menu text was updated to cover all buttons.
+
+- 🧠 OCR and image processing improvements:
+  - Decoupled image saving from OCR outcome: captcha images are saved once up front and renamed/deleted later based on result.
+  - Captcha images from successful OCR are now saved as `<captcha>.png`.
+  - Failed OCR attempts are saved (if enabled) as `FAIL_<captcha>_<timestamp>.png`.
+
+---
+
+## 🐛 Known Issue: Crash on Startup (CPU Incompatibility)
+
+```
+[W502 21:55:47.413693709 NNPACK.cpp:57] Could not initialize NNPACK! Reason: Unsupported hardware.
+Illegal instruction
+```
+
+This occurs on CPUs that **lack AVX or AVX2 instruction support** (common in CPUs before 2011). PyTorch requires these instruction sets. This is not a bug in the bot, but a limitation of PyTorch.
+
+📌 **Workaround (in progress):**
+We're exploring lighter alternatives to EasyOCR and PyTorch for users on older hardware. A solution will be published in a future patch.

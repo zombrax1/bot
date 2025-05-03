@@ -4,13 +4,16 @@
 import os
 import warnings
 import base64
-import asyncio
+import io
 import time
 import easyocr
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 from datetime import datetime
+import traceback
+import logging
+import logging.handlers
 
 # Suppress PyTorch warnings
 warnings.filterwarnings("ignore", message=".*pin_memory.*", category=UserWarning)
@@ -29,7 +32,24 @@ class GiftCaptchaSolver:
         self.gpu_device = gpu_device
         self.save_images_mode = save_images
         self.min_confidence = 0.4
-        
+
+        # Logger setup for gift_solver.txt
+        self.logger = logging.getLogger("gift_solver")
+        self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
+
+        log_dir = 'log'
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        log_file = os.path.join(log_dir, 'gift_solver.txt')
+        handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=3 * 1024 * 1024, backupCount=3, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+
+        if not self.logger.hasHandlers():
+            self.logger.addHandler(handler)
+
         # Set up captcha image directory
         self.captcha_dir = 'captcha_images'
         os.makedirs(self.captcha_dir, exist_ok=True)
@@ -99,18 +119,18 @@ class GiftCaptchaSolver:
                     if self.gpu_device is not None:
                         torch.cuda.set_device(self.gpu_device)
                     gpu_name = torch.cuda.get_device_name(self.gpu_device or 0)
-                    print(f"Captcha Solver: Using GPU device {self.gpu_device or 0}: {gpu_name}")
+                    self.logger.info(f"Captcha Solver: Using GPU device {self.gpu_device or 0}: {gpu_name}")
                     self.reader = easyocr.Reader(['en'], gpu=True)
                 except Exception as e:
-                    print(f"Captcha Solver: GPU error: {str(e)}. Falling back to CPU.")
+                    self.logger.warning(f"Captcha Solver: GPU error: {str(e)}. Falling back to CPU.")
                     self.reader = easyocr.Reader(['en'], gpu=False)
             else:
-                print("Captcha Solver: Using CPU only (no GPU acceleration)")
+                self.logger.info("Captcha Solver: Using CPU only (no GPU acceleration)")
                 self.reader = easyocr.Reader(['en'], gpu=False)
         except Exception as e:
-            print(f"Captcha Solver: Error initializing EasyOCR: {str(e)}")
-            print("Captcha Solver: Make sure you have the required libraries installed:")
-            print("pip install easyocr torch opencv-python pillow")
+            self.logger.exception(f"Captcha Solver: Error initializing EasyOCR: {str(e)}")
+            self.logger.exception("Captcha Solver: Make sure you have the required libraries installed:")
+            self.logger.exception("pip install easyocr torch opencv-python pillow")
             raise
     
     def preprocess_captcha(self, image):
@@ -237,125 +257,98 @@ class GiftCaptchaSolver:
         Returns:
             str: Path to the saved image, or None if saving failed.
         """
-        if not self.save_images:
+        if self.save_images_mode == 0:
             return None
             
         try:
             timestamp = int(time.time())
-            image_filename = f"fid{fid}_try{attempt}_OCR_{captcha_code}_{timestamp}.png"
+            safe_captcha_code = "".join(c if c.isalnum() else "_" for c in str(captcha_code))
+            image_filename = f"fid{fid}_try{attempt}_OCR_{safe_captcha_code}_{timestamp}.png"
             full_path = os.path.join(self.captcha_dir, image_filename)
             
             if cv2.imwrite(full_path, img_np):
                 return full_path
-            return None
+            else:
+                self.logger.error(f"Captcha Solver: Failed to write image file (cv2.imwrite returned False) to path: {full_path}")
+                return None
         except Exception as e:
-            print(f"Captcha Solver: Exception during saving captcha image: {str(e)}")
+            self.logger.exception(f"Captcha Solver: Exception during saving captcha image: {str(e)}")
             return None
     
-    async def solve_captcha(self, captcha_base64, fid="unknown", attempt=0):
+    async def solve_captcha(self, image_base64, fid=None, attempt=0):
         ocr_success = False
-        best_result = None
-        img_np = None
+        temp_path = None
         try:
-            self.stats["total_attempts"] += 1
+            if image_base64.startswith("data:image"):
+                image_base64 = image_base64.split(",", 1)[1]
+
+            image_data = base64.b64decode(image_base64)
+            image = Image.open(io.BytesIO(image_data)).convert('RGB')
+
+            timestamp = int(time.time())
+            temp_filename = f"temp_fid{fid}_try{attempt}_{timestamp}.png"
+            temp_path = os.path.join(self.captcha_dir, temp_filename)
+            image.save(temp_path)
+
+            preprocessed_versions = self.preprocess_captcha(image)
+
+            best_result = None
+            best_confidence = 0.0
+            best_text = ""
+            best_method = "None"
+
+            for method, img in preprocessed_versions:
+                result = self.reader.readtext(img, detail=1)
+                for _, text, confidence in result:
+                    text = text.strip().replace(' ', '')
+                    if confidence > self.min_confidence and len(text) == 4 and text.isalnum():
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_text = text
+                            best_method = method
+                            best_result = (text, method, confidence)
+
+            if best_result:
+                ocr_success = True
+
             self.run_stats["total_attempts"] += 1
-
-            if captcha_base64.startswith("data:image"):
-                img_base64 = captcha_base64.split(",", 1)[1]
-            else:
-                img_base64 = captcha_base64
-
-            img_bytes = base64.b64decode(img_base64)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-            processed_images = self.preprocess_captcha(img_np)
-
-            candidates = []
-            loop = asyncio.get_event_loop()
-            for method_name, processed_img in processed_images:
-                if len(processed_img.shape) == 3 and processed_img.shape[2] == 3:
-                    encode_success, encoded_bytes = cv2.imencode('.png', processed_img)
-                elif len(processed_img.shape) == 2:
-                    encode_success, encoded_bytes = cv2.imencode('.png', processed_img)
-                else:
-                    print(f"Captcha Solver: Warning - Unexpected image shape {processed_img.shape} for method {method_name}. Skipping.")
-                    continue
-
-                if not encode_success:
-                     print(f"Captcha Solver: Warning - Failed to encode image for method {method_name}. Skipping.")
-                     continue
-
-                processed_bytes = encoded_bytes.tobytes()
-
-                results = await loop.run_in_executor(None, lambda: self.reader.readtext(processed_bytes, detail=1))
-
-                for result in results:
-                    if len(result) >= 3:
-                        text = result[1].strip().replace(' ', '')
-                        confidence = result[2]
-                        if text and confidence > self.min_confidence:
-                            candidates.append((text, confidence, method_name))
-
-            candidates.sort(key=lambda x: x[1], reverse=True)
-            best_confidence = 0
-            best_method = None
-
-            for text, confidence, method_name in candidates:
-                if text.isalnum() and len(text) == 4:
-                    best_result = text
-                    best_confidence = confidence
-                    best_method = method_name
-                    ocr_success = True
-                    break
-
-            should_save = False
-            save_status_tag = "UNKNOWN"
-
+            self.stats["total_attempts"] += 1
             if ocr_success:
-                if self.save_images_mode == 2 or self.save_images_mode == 3:
-                    should_save = True
-                    save_status_tag = best_result
-            else:
-                if self.save_images_mode == 1 or self.save_images_mode == 3:
-                    should_save = True
-                    save_status_tag = "FAILED"
-
-            if should_save and img_np is not None:
-                self.save_captcha_image(img_np, fid, attempt, save_status_tag)
-
-            if ocr_success:
-                self.stats["successful_decodes"] += 1
                 self.run_stats["successful_decodes"] += 1
-
+                self.stats["successful_decodes"] += 1
                 if attempt == 0:
-                    self.stats["first_try_success"] += 1
                     self.run_stats["first_try_success"] += 1
-                else:
-                    self.stats["retries"] += 1
-                    self.run_stats["retries"] += 1
-
-                return best_result, True, best_method, best_confidence
+                    self.stats["first_try_success"] += 1
+                return best_text, True, best_method, best_confidence, temp_path
             else:
-                self.stats["failures"] += 1
                 self.run_stats["failures"] += 1
-                return None, False, None, 0
+                self.stats["failures"] += 1
+                if attempt > 0:
+                    self.run_stats["retries"] += 1
+                    self.stats["retries"] += 1
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+                return "", False, "None", 0.0, None
 
         except Exception as e:
-            print(f"Captcha Solver: Error solving captcha: {str(e)}")
             traceback.print_exc()
-            self.stats["failures"] += 1
+            self.run_stats["total_attempts"] += 1
+            self.stats["total_attempts"] += 1
             self.run_stats["failures"] += 1
-
-            # Save image on exception if configured and possible
-            if (self.save_images_mode == 1 or self.save_images_mode == 3) and img_np is not None:
+            self.stats["failures"] += 1
+            if attempt > 0:
+                self.run_stats["retries"] += 1
+                self.stats["retries"] += 1
+            if temp_path and os.path.exists(temp_path):
                 try:
-                    self.save_captcha_image(img_np, fid, attempt, "EXCEPTION")
-                except Exception as save_err:
-                     print(f"Captcha Solver: Error saving image during exception handling: {save_err}")
-
-            return None, False, None, 0
-    
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            return "", False, "Exception", 0.0, None
+        
     def get_stats(self):
         """Get current OCR statistics."""
         return self.stats

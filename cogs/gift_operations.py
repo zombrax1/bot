@@ -25,23 +25,37 @@ class GiftOperations(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         
-        # Logger Setup
+        # Logger Setup for gift_ops.txt
         self.logger = logging.getLogger('gift_ops')
         self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False  # Prevent propagation to root logger
         log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
         log_dir = 'log'
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        log_file_path = os.path.join(log_dir, 'gift_ops.log')
+        log_file_path = os.path.join(log_dir, 'gift_ops.txt')
         self.log_directory = log_dir
 
-        # Rotate after 3MB, keep 3 backup logs
         file_handler = logging.handlers.RotatingFileHandler(
-            log_file_path, maxBytes=3*1024*1024, backupCount=3, encoding='utf-8'
+            log_file_path, maxBytes=3 * 1024 * 1024, backupCount=3, encoding='utf-8'
         )
         file_handler.setFormatter(log_formatter)
-        self.logger.addHandler(file_handler)
+        if not self.logger.hasHandlers():
+            self.logger.addHandler(file_handler)
+
+        # Logger Setup for giftlog.txt
+        self.giftlog = logging.getLogger("giftlog")
+        self.giftlog.setLevel(logging.INFO)
+        self.giftlog.propagate = False
+
+        giftlog_file = os.path.join(log_dir, 'giftlog.txt')
+        giftlog_handler = logging.handlers.RotatingFileHandler(
+            giftlog_file, maxBytes=3 * 1024 * 1024, backupCount=3, encoding='utf-8'
+        )
+        giftlog_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        if not self.giftlog.hasHandlers():
+            self.giftlog.addHandler(giftlog_handler)
 
         self.logger.info("GiftOperations Cog initializing...")
 
@@ -50,7 +64,7 @@ class GiftOperations(commands.Cog):
             self.cursor = self.conn.cursor()
         else:
             if not os.path.exists('db'):
-                 os.makedirs('db')
+                os.makedirs('db')
             self.conn = sqlite3.connect('db/giftcode.sqlite')
             self.cursor = self.conn.cursor()
 
@@ -220,13 +234,13 @@ class GiftOperations(commands.Cog):
                             if use_gpu_setting == 1 and gpu_available:
                                 actual_use_gpu = True
                             elif use_gpu_setting == 1 and not gpu_available:
-                                 self.logger.warning("GPU requested but not available, forcing CPU.")
+                                self.logger.warning("GPU requested but not available, forcing CPU.")
                         except ImportError:
-                             self.logger.warning("PyTorch not installed, cannot use GPU.")
-                             actual_use_gpu = False
+                            self.logger.warning("PyTorch not installed, cannot use GPU.")
+                            actual_use_gpu = False
                         except Exception as torch_err:
-                             self.logger.error(f"Error checking torch/GPU: {torch_err}, forcing CPU.")
-                             actual_use_gpu = False
+                            self.logger.error(f"Error checking torch/GPU: {torch_err}, forcing CPU.")
+                            actual_use_gpu = False
 
                         try:
                             self.captcha_solver = GiftCaptchaSolver(
@@ -242,7 +256,7 @@ class GiftOperations(commands.Cog):
                 else:
                     self.logger.warning("Could not load OCR settings from database in on_ready.")
             else:
-                 self.logger.info("Captcha solver was already initialized in __init__.")
+                self.logger.info("Captcha solver was already initialized in __init__.")
 
             # Gift Code Channel Validation
             self.logger.info("Validating gift code channels...")
@@ -257,8 +271,8 @@ class GiftOperations(commands.Cog):
                     self.logger.warning(f"Channel ID {channel_id} (Alliance: {alliance_id}) is invalid or bot cannot access it. Marking for removal.")
                     invalid_channels.append(channel_id)
                 elif not isinstance(channel, discord.TextChannel):
-                     self.logger.warning(f"Channel ID {channel_id} (Alliance: {alliance_id}) is not a Text Channel. Marking for removal.")
-                     invalid_channels.append(channel_id)
+                    self.logger.warning(f"Channel ID {channel_id} (Alliance: {alliance_id}) is not a Text Channel. Marking for removal.")
+                    invalid_channels.append(channel_id)
                 elif not channel.permissions_for(channel.guild.me).send_messages:
                     self.logger.warning(f"Missing send message permissions in channel {channel_id}. Functionality may be limited.")
 
@@ -286,7 +300,7 @@ class GiftOperations(commands.Cog):
             self.logger.info("GiftOps Cog: on_ready setup finished successfully.")
 
         except sqlite3.Error as db_err:
-             self.logger.exception(f"DATABASE ERROR during on_ready setup: {db_err}")
+            self.logger.exception(f"DATABASE ERROR during on_ready setup: {db_err}")
         except Exception as e:
             self.logger.exception(f"UNEXPECTED ERROR during on_ready setup: {e}")
 
@@ -333,9 +347,9 @@ class GiftOperations(commands.Cog):
             # Use Lock for Validation 
             current_time = time.time()
             if current_time - self.last_validation_attempt_time < self.validation_cooldown:
-                 wait_time = self.validation_cooldown - (current_time - self.last_validation_attempt_time)
-                 self.logger.info(f"GiftOps: [on_message] Validation cooldown active. Waiting {wait_time:.1f}s before checking '{giftcode}'.")
-                 await asyncio.sleep(wait_time)
+                wait_time = self.validation_cooldown - (current_time - self.last_validation_attempt_time)
+                self.logger.info(f"GiftOps: [on_message] Validation cooldown active. Waiting {wait_time:.1f}s before checking '{giftcode}'.")
+                await asyncio.sleep(wait_time)
 
             async with self._validation_lock:
                 self.last_validation_attempt_time = time.time()
@@ -399,9 +413,9 @@ class GiftOperations(commands.Cog):
 
                     # Attempt to add via API as well
                     try:
-                       asyncio.create_task(self.api.add_giftcode(giftcode))
+                        asyncio.create_task(self.api.add_giftcode(giftcode))
                     except Exception as api_add_err:
-                       self.logger.exception(f"GiftOps: [on_message] Error calling api.add_giftcode for '{giftcode}': {api_add_err}")
+                        self.logger.exception(f"GiftOps: [on_message] Error calling api.add_giftcode for '{giftcode}': {api_add_err}")
 
                     self.cursor.execute("SELECT alliance_id FROM giftcodecontrol WHERE status = 1")
                     auto_alliances = self.cursor.fetchall()
@@ -428,6 +442,10 @@ class GiftOperations(commands.Cog):
                             f"🎁 **Gift Code:** `{giftcode}`\n"
                             f"📝 **Status:** Already in database.\n"
                             f"━━━━━━━━━━━━━━━━━━━━━━\n")
+
+            elif initial_check == "CAPTCHA_INVALID":
+                self.logger.info(f"GiftOps: [on_message] Validation for '{giftcode}' failed due to invalid captcha. Will retry later.")
+                reaction_to_add = "⏳"
 
             elif initial_check == "TIMEOUT_RETRY":
                 self.logger.info(f"GiftOps: [on_message] Validation for '{giftcode}' hit rate limit (TIMEOUT_RETRY). Message reaction added.")
@@ -478,8 +496,7 @@ class GiftOperations(commands.Cog):
                 f"---------------------------------------------------------\n"
             )
             try:
-                with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                    log_file.write(log_message_handler)
+                self.giftlog.info(log_message_handler.strip())
             except Exception as log_e:
                 self.logger.exception(f"GiftOps: CRITICAL - Failed to write on_message handler error log: {log_e}")
 
@@ -521,6 +538,7 @@ class GiftOperations(commands.Cog):
     async def claim_giftcode_rewards_wos(self, player_id, giftcode):
         log_file_path = os.path.join(self.log_directory, 'giftlog.txt')
         status = "ERROR"
+        image_path = None
 
         try:
             # Cache Check
@@ -541,18 +559,19 @@ class GiftOperations(commands.Cog):
             except json.JSONDecodeError:
                 log_entry_player += f"Response Code: {response_stove_info.status_code}\nResponse Text (Not JSON): {response_stove_info.text[:500]}...\n"
             log_entry_player += "-" * 50 + "\n"
-            with open(log_file_path, 'a', encoding='utf-8') as log_file: log_file.write(log_entry_player)
+            self.giftlog.info(log_entry_player.strip())
 
-            try: player_info_json = response_stove_info.json()
-            except json.JSONDecodeError: player_info_json = {}
+            try:
+                player_info_json = response_stove_info.json()
+            except json.JSONDecodeError:
+                player_info_json = {}
             login_successful = player_info_json.get("msg") == "success"
 
             if not login_successful:
-                login_fail_msg = player_info_json.get("msg", f"Non-JSON/Unknown (Code: {response_stove_info.status_code})")
-                log_message = f"{datetime.now()} Login failed for FID {player_id}: {login_fail_msg}\n"
-                self.logger.info(log_message.strip())
-                with open(log_file_path, 'a', encoding='utf-8') as log_file: log_file.write(log_message)
-                return "LOGIN_FAILED"
+                status = "LOGIN_FAILED"
+                log_message = f"{datetime.now()} Login failed for FID {player_id}: {player_info_json.get('msg', 'Unknown')}\n"
+                self.giftlog.info(log_message.strip())
+                return status
 
             # Check if OCR Enabled and Solver Ready
             self.settings_cursor.execute("SELECT enabled FROM ocr_settings ORDER BY id DESC LIMIT 1")
@@ -560,9 +579,10 @@ class GiftOperations(commands.Cog):
             ocr_enabled = ocr_settings_row[0] if ocr_settings_row else 0
 
             if not (ocr_enabled == 1 and self.captcha_solver):
+                status = "OCR_DISABLED" if ocr_enabled == 0 else "SOLVER_ERROR"
                 log_msg = f"{datetime.now()} Skipping captcha: OCR disabled (Enabled={ocr_enabled}) or Solver not ready ({self.captcha_solver is None}) for FID {player_id}.\n"
                 self.logger.info(log_msg.strip())
-                return "OCR_DISABLED" if ocr_enabled == 0 else "SOLVER_ERROR"
+                return status
 
             # Captcha Fetching and Solving Loop
             self.logger.info(f"GiftOps: OCR enabled and solver initialized for FID {player_id}.")
@@ -574,25 +594,23 @@ class GiftOperations(commands.Cog):
                 captcha_image_base64, error = await self.fetch_captcha(player_id, session)
 
                 if error:
-                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                        log_file.write(f"{datetime.now()} Captcha fetch error for {player_id}: {error}\n")
-                    return "TIMEOUT_RETRY" if error == "CAPTCHA_TOO_FREQUENT" else "CAPTCHA_FETCH_ERROR"
+                    status = "TIMEOUT_RETRY" if error == "CAPTCHA_TOO_FREQUENT" else "CAPTCHA_FETCH_ERROR"
+                    self.giftlog.info(f"{datetime.now()} Captcha fetch error for {player_id}: {error}\n")
+                    break
 
-                captcha_code, success, method, confidence = await self.captcha_solver.solve_captcha(
+                captcha_code, success, method, confidence, image_path = await self.captcha_solver.solve_captcha(
                     captcha_image_base64, fid=player_id, attempt=attempt)
 
                 if not success:
-                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                        log_file.write(f"{datetime.now()} OCR failed for FID {player_id} on attempt {attempt + 1}\n")
+                    self.giftlog.info(f"{datetime.now()} OCR failed for FID {player_id} on attempt {attempt + 1}\n")
                     status = "OCR_FAILED_ATTEMPT"
                     if attempt == max_ocr_attempts - 1:
-                         status = "MAX_CAPTCHA_ATTEMPTS_REACHED"
+                        status = "MAX_CAPTCHA_ATTEMPTS_REACHED"
                     continue
 
-                with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                    log_file.write(f"{datetime.now()} OCR solved for {player_id}: {captcha_code} (meth:{method}, conf:{confidence:.2f}, att:{attempt+1})\n")
+                self.giftlog.info(f"{datetime.now()} OCR solved for {player_id}: {captcha_code} (meth:{method}, conf:{confidence:.2f}, att:{attempt+1})\n")
 
-                data_to_encode = {"fid":f"{player_id}", "cdk":giftcode, "captcha_code":captcha_code, "time":f"{int(datetime.now().timestamp()*1000)}"}
+                data_to_encode = {"fid": f"{player_id}", "cdk": giftcode, "captcha_code": captcha_code, "time": f"{int(datetime.now().timestamp()*1000)}"}
                 data = self.encode_data(data_to_encode)
                 response_giftcode = session.post(self.wos_giftcode_url, data=data)
 
@@ -604,56 +622,46 @@ class GiftOperations(commands.Cog):
                     response_json_redeem = {}
                     log_entry_redeem += f"Resp Code: {response_giftcode.status_code}\nResponse Text (Not JSON): {response_giftcode.text[:500]}...\n"
                 log_entry_redeem += "-" * 50 + "\n"
-                with open(log_file_path, 'a', encoding='utf-8') as log_file: log_file.write(log_entry_redeem)
+                self.giftlog.info(log_entry_redeem.strip())
 
                 msg = response_json_redeem.get("msg", "Unknown Error").strip('.')
                 err_code = response_json_redeem.get("err_code")
 
                 if msg == "CAPTCHA CHECK ERROR" and err_code == 40103:
-                    self.logger.warning(f"API rejected captcha for {player_id}. Returning CAPTCHA_INVALID.")
-                    return "CAPTCHA_INVALID"
-
+                    status = "CAPTCHA_INVALID"
                 elif msg == "CAPTCHA CHECK TOO FREQUENT" and err_code == 40101:
-                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                        log_file.write(f"{datetime.now()} API rate limit on captcha check for {player_id}.\n")
-                    return "TIMEOUT_RETRY"
-
+                    status = "TIMEOUT_RETRY"
                 elif msg == "NOT LOGIN":
-                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                        log_file.write(f"{datetime.now()} Session expired ('NOT LOGIN') for {player_id}.\n")
-                    return "LOGIN_EXPIRED_MID_PROCESS"
-
-                elif msg == "SUCCESS": status = "SUCCESS"
-                elif msg == "RECEIVED" and err_code == 40008: status = "RECEIVED"
-                elif msg == "SAME TYPE EXCHANGE" and err_code == 40011: status = "SAME TYPE EXCHANGE"
-                elif msg == "TIME ERROR" and err_code == 40007: status = "TIME_ERROR"
-                elif msg == "CDK NOT FOUND" and err_code == 40014: status = "CDK_NOT_FOUND"
-                elif msg == "USED" and err_code == 40005: status = "USAGE_LIMIT"
+                    status = "LOGIN_EXPIRED_MID_PROCESS"
+                elif msg == "SUCCESS":
+                    status = "SUCCESS"
+                elif msg == "RECEIVED" and err_code == 40008:
+                    status = "RECEIVED"
+                elif msg == "SAME TYPE EXCHANGE" and err_code == 40011:
+                    status = "SAME TYPE EXCHANGE"
+                elif msg == "TIME ERROR" and err_code == 40007:
+                    status = "TIME_ERROR"
+                elif msg == "CDK NOT FOUND" and err_code == 40014:
+                    status = "CDK_NOT_FOUND"
+                elif msg == "USED" and err_code == 40005:
+                    status = "USAGE_LIMIT"
                 elif msg == "TIMEOUT RETRY" and err_code == 40004:
                     status = "TIMEOUT_RETRY"
                 else:
-                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                        log_file.write(f"{datetime.now()} Unknown API response for {player_id}: msg='{msg}', err_code={err_code}\n")
                     status = "UNKNOWN_API_RESPONSE"
-                
+                    self.giftlog.info(f"Unknown API response for {player_id}: msg='{msg}', err_code={err_code}\n")
+
                 if player_id != "244886619" and status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
                     try:
                         self.cursor.execute("""
                             INSERT OR REPLACE INTO user_giftcodes (fid, giftcode, status)
                             VALUES (?, ?, ?)
                         """, (player_id, giftcode, status))
-
                         self.conn.commit()
-                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                            log_file.write(f"{datetime.now()} DATABASE - Saved/Updated status for User {player_id}, Code '{giftcode}', Status {status}\n")
-                    except sqlite3.Error as db_err:
-                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                            log_file.write(f"{datetime.now()} DATABASE ERROR saving/replacing status for {player_id}/{giftcode}: {db_err}\n")
-                            log_file.write(f"STACK TRACE: {traceback.format_exc()}\n")
-                    except Exception as e:
-                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                            log_file.write(f"{datetime.now()} UNEXPECTED DB ERROR saving/replacing status for {player_id}/{giftcode}: {e}\n")
-                            log_file.write(f"STACK TRACE: {traceback.format_exc()}\n")
+                        self.giftlog.info(f"DATABASE - Saved/Updated status for User {player_id}, Code '{giftcode}', Status {status}\n")
+                    except Exception as db_err:
+                        self.giftlog.exception(f"DATABASE ERROR saving/replacing status for {player_id}/{giftcode}: {db_err}\n")
+                        self.giftlog.exception(f"STACK TRACE: {traceback.format_exc()}\n")
 
                 break
 
@@ -668,14 +676,34 @@ class GiftOperations(commands.Cog):
             )
             self.logger.exception(f"GiftOps: UNEXPECTED Error claiming code {giftcode} for FID {player_id}. Details logged.")
             try:
-                with open(log_file_path, 'a', encoding='utf-8') as log_file: log_file.write(log_message)
+                self.giftlog.error(log_message.strip())
             except Exception as log_e: self.logger.exception(f"GiftOps: CRITICAL - Failed to write unexpected error log: {log_e}")
             status = "ERROR"
 
-        self.logger.info(f"Final status for FID {player_id} / Code '{giftcode}': {status}")
+        # Image save handling
+        if image_path and os.path.exists(image_path):
+            if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+                if self.captcha_solver.save_images_mode in [2, 3]:
+                    new_path = os.path.join(self.captcha_solver.captcha_dir, f"{captcha_code}.png")
+                    os.rename(image_path, new_path)
+                    self.logger.info(f"GiftOps: Captcha success image renamed to {new_path} (status: {status})")
+                else:
+                    os.remove(image_path)
+            elif status == "CAPTCHA_INVALID":
+                if self.captcha_solver.save_images_mode in [1, 3]:
+                    fail_name = f"FAIL_{captcha_code}_{int(time.time())}.png"
+                    fail_path = os.path.join(self.captcha_solver.captcha_dir, fail_name)
+                    os.rename(image_path, fail_path)
+                    self.logger.info(f"GiftOps: Captcha fail image renamed to {fail_path} (status: {status})")
+                else:
+                    os.remove(image_path)
+            else:
+                os.remove(image_path)
+
+        self.logger.info(f"GiftOps: Final status for FID {player_id} / Code '{giftcode}': {status}")
         return status
 
-    @tasks.loop(seconds=300)
+    @tasks.loop(seconds=1800)
     async def check_channels_loop(self):
         log_file_path = os.path.join(self.log_directory, 'giftlog.txt')
         loop_start_time = datetime.now()
@@ -723,7 +751,7 @@ class GiftOperations(commands.Cog):
             for channel in valid_channels:
                 self.logger.info(f"GiftOps: [Loop] Scanning channel {channel.id} ({channel.name})...")
                 try:
-                    # Find last definitive reaction timestamp (as before)
+                    # Find last definitive reaction timestamp
                     last_definitive_reaction_time = None
                     async for msg_hist in channel.history(limit=fetch_limit, oldest_first=False):
                         if msg_hist.reactions:
@@ -774,7 +802,7 @@ class GiftOperations(commands.Cog):
                     if code_match:
                         potential_code = code_match.group(1)
                         if re.match(r'^[a-zA-Z0-9]+$', potential_code):
-                             giftcode = potential_code
+                            giftcode = potential_code
 
                 if not giftcode:
                     continue
@@ -786,7 +814,7 @@ class GiftOperations(commands.Cog):
 
                 # If code hasn't been processed *this run* and has no definitive reaction, mark for validation
                 if giftcode not in processed_code_statuses:
-                     unique_codes_to_validate.add(giftcode)
+                    unique_codes_to_validate.add(giftcode)
 
             self.logger.info(f"GiftOps: [Loop] Found {len(unique_codes_to_validate)} unique codes needing validation.")
 
@@ -823,12 +851,10 @@ class GiftOperations(commands.Cog):
                         await asyncio.sleep(wait_time)
 
                     async with asyncio.timeout(30):
-                         async with self._validation_lock:
+                        async with self._validation_lock:
                             lock_acquired = True
                             self.last_validation_attempt_time = time.time()
                             self.logger.info(f"GiftOps: [Loop] Acquired lock for validation FID check on '{code}'.")
-                            with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                log_file.write(f"{log_timestamp} [Loop-Unique] Acquiring lock for code '{code}'.\n")
 
                             status = await self.claim_giftcode_rewards_wos(validation_fid, code)
                             if status not in ["ERROR", "TIMEOUT_RETRY", "CAPTCHA_RETRY", "CAPTCHA_API_REJECTED", "OCR_DISABLED", "SOLVER_ERROR", "LOGIN_FAILED", "CAPTCHA_FETCH_ERROR", "MAX_CAPTCHA_ATTEMPTS_REACHED", "LOGIN_EXPIRED_MID_PROCESS", "UNKNOWN_API_RESPONSE"]: # Cache definitive results
@@ -837,32 +863,28 @@ class GiftOperations(commands.Cog):
                                     self.conn.commit()
                                     self.logger.info(f"GiftOps: [Loop] Cached validation result '{status}' for code '{code}'.")
                                 except sqlite3.Error as db_cache_err:
-                                     self.logger.exception(f"GiftOps: [Loop] DB Error caching validation status for {code}: {db_cache_err}")
+                                    self.logger.exception(f"GiftOps: [Loop] DB Error caching validation status for {code}: {db_cache_err}")
 
                             log_timestamp_after = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                             self.logger.info(f"GiftOps: [Loop] Validation result for '{code}': {status}")
-                            with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                                log_file.write(f"{log_timestamp_after} [Loop-Unique] Validation result for '{code}': {status}\n")
 
                     log_timestamp_release = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     self.logger.info(f"GiftOps: [Loop] Released validation lock for '{code}'.")
-                    with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                        log_file.write(f"{log_timestamp_release} [Loop-Unique] Released lock for code '{code}'.\n")
                     lock_acquired = False
                     processed_code_statuses[code] = status
 
                 except asyncio.TimeoutError:
-                     self.logger.exception(f"GiftOps: [Loop] Timeout acquiring lock for '{code}'. Marking as TIMEOUT_RETRY.")
-                     processed_code_statuses[code] = "TIMEOUT_RETRY"
+                    self.logger.exception(f"GiftOps: [Loop] Timeout acquiring lock for '{code}'. Marking as TIMEOUT_RETRY.")
+                    processed_code_statuses[code] = "TIMEOUT_RETRY"
                 except Exception as lock_err:
-                     self.logger.exception(f"GiftOps: [Loop] Error during lock/validation for '{code}': {lock_err}")
-                     traceback.print_exc()
-                     processed_code_statuses[code] = "ERROR"
+                    self.logger.exception(f"GiftOps: [Loop] Error during lock/validation for '{code}': {lock_err}")
+                    traceback.print_exc()
+                    processed_code_statuses[code] = "ERROR"
                 finally:
-                     if lock_acquired and self._validation_lock.locked():
-                         try: self._validation_lock.release()
-                         except RuntimeError: pass
-                         self.logger.exception(f"GiftOps: [Loop] Force-released validation lock (error) for '{code}'.")
+                    if lock_acquired and self._validation_lock.locked():
+                        try: self._validation_lock.release()
+                        except RuntimeError: pass
+                        self.logger.exception(f"GiftOps: [Loop] Force-released validation lock (error) for '{code}'.")
 
                 # Delay between validating unique codes to ease API load
                 await asyncio.sleep(random.uniform(2.0, 4.0))
@@ -882,13 +904,13 @@ class GiftOperations(commands.Cog):
                     reaction_to_add = "✅"
                     self.cursor.execute("SELECT 1 FROM gift_codes WHERE giftcode = ?", (code,))
                     if not self.cursor.fetchone() and code not in codes_added_this_run:
-                         is_valid_and_new = True
+                        is_valid_and_new = True
                 elif status in ["TIME_ERROR", "CDK_NOT_FOUND", "USAGE_LIMIT"]:
                     reaction_to_add = "❌"
                 elif status == "TIMEOUT_RETRY":
                     reaction_to_add = "⏳"
                 elif status in ["ERROR", "OCR_DISABLED", "SOLVER_ERROR", "LOGIN_FAILED", "CAPTCHA_FETCH_ERROR", "MAX_CAPTCHA_ATTEMPTS_REACHED", "LOGIN_EXPIRED_MID_PROCESS", "UNKNOWN_API_RESPONSE", "CAPTCHA_API_REJECTED"]:
-                     reaction_to_add = "⚠️"
+                    reaction_to_add = "⚠️"
                 else:
                     reaction_to_add = "❓"
 
@@ -934,11 +956,11 @@ class GiftOperations(commands.Cog):
             # Step 6: Periodic Full Validation
             self.logger.info("\nGiftOps: [Loop] Running periodic validation of existing codes in DB...")
             try:
-                 await self.validate_gift_codes()
-                 self.logger.info("GiftOps: [Loop] Periodic validation complete.")
+                await self.validate_gift_codes()
+                self.logger.info("GiftOps: [Loop] Periodic validation complete.")
             except Exception as val_err:
-                 self.logger.exception(f"GiftOps: [Loop] ERROR during periodic validation: {val_err}")
-                 traceback.print_exc()
+                self.logger.exception(f"GiftOps: [Loop] ERROR during periodic validation: {val_err}")
+                traceback.print_exc()
 
             loop_end_time = datetime.now()
             self.logger.info(f"GiftOps: check_channels_loop finished at {loop_end_time.strftime('%Y-%m-%d %H:%M:%S')}. Duration: {loop_end_time - loop_start_time}\n")
@@ -949,21 +971,20 @@ class GiftOperations(commands.Cog):
             error_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             error_details = traceback.format_exc()
             log_message_loop = (
-                 f"\n--- FATAL ERROR in check_channels_loop ({error_timestamp}) ---\n"
-                 f"Error: {str(e)}\nTraceback:\n{error_details}\n"
-                 f"------------------------------------------------------------\n"
+                f"\n--- FATAL ERROR in check_channels_loop ({error_timestamp}) ---\n"
+                f"Error: {str(e)}\nTraceback:\n{error_details}\n"
+                f"------------------------------------------------------------\n"
             )
             try:
-                with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                    log_file.write(log_message_loop)
+                self.giftlog.info(log_message_loop.strip())
             except Exception as log_e:
-                 self.logger.exception(f"GiftOps: CRITICAL - Failed to write loop error log: {log_e}")
+                self.logger.exception(f"GiftOps: CRITICAL - Failed to write loop error log: {log_e}")
 
     @check_channels_loop.before_loop
     async def before_check_channels_loop(self):
-         self.logger.info("GiftOps: Waiting for bot to be ready before starting check_channels_loop...")
-         await self.bot.wait_until_ready()
-         self.logger.info("GiftOps: Bot is ready, check_channels_loop starting.")
+        self.logger.info("GiftOps: Waiting for bot to be ready before starting check_channels_loop...")
+        await self.bot.wait_until_ready()
+        self.logger.info("GiftOps: Bot is ready, check_channels_loop starting.")
 
     async def fetch_captcha(self, player_id, session=None):
         """Fetch a captcha image for a player ID."""
@@ -1013,8 +1034,8 @@ class GiftOperations(commands.Cog):
             if not admin_info or admin_info[0] != 1:
                 if interaction.response.is_done():
                     await interaction.followup.send(
-                         "❌ You don't have permission to access OCR settings.",
-                         ephemeral=True
+                        "❌ You don't have permission to access OCR settings.",
+                        ephemeral=True
                     )
                 else:
                     await interaction.response.send_message(
@@ -1051,7 +1072,7 @@ class GiftOperations(commands.Cog):
                     gpu_available = False
                 ocr_libraries_installed = True
             except ImportError:
-                 gpu_available = False
+                gpu_available = False
 
             save_options_text = {
                 0: "❌ None",
@@ -1540,13 +1561,21 @@ class GiftOperations(commands.Cog):
                 "**Available Operations**\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🎫 **Create Gift Code**\n"
-                "└ Generate new gift codes\n\n"
+                "└ Input a new gift code\n\n"
+                "🔍 **CAPTCHA Settings**\n"
+                "└ Configure OCR and image saving options\n\n"
                 "📋 **List Gift Codes**\n"
-                "└ View all active codes\n\n"
-                "⚙️ **Auto Gift Settings**\n"
-                "└ Configure automatic gift code usage\n\n"
+                "└ View all active, valid codes\n\n"
                 "❌ **Delete Gift Code**\n"
                 "└ Remove existing codes\n\n"
+                "📢 **Gift Code Channel**\n"
+                "└ Set the channel to monitor for gift codes\n\n"
+                "⚙️ **Auto Gift Settings**\n"
+                "└ Configure automatic gift code usage\n\n"
+                "🗑️ **Delete Gift Channel**\n"
+                "└ Clear the configured gift code channel\n\n"
+                "🎯 **Use Gift Code for Alliance**\n"
+                "└ Redeem a gift code for one or more alliances\n"
                 "━━━━━━━━━━━━━━━━━━━━━━"
             ),
             color=discord.Color.gold()
@@ -2278,9 +2307,9 @@ class GiftOperations(commands.Cog):
                 remaining_in_queue = []
                 for item in retry_queue:
                     if current_time >= item[3]:
-                         ready_to_retry.append(item[:3])
+                        ready_to_retry.append(item[:3])
                     else:
-                         remaining_in_queue.append(item)
+                        remaining_in_queue.append(item)
                 retry_queue = remaining_in_queue
                 active_members_to_process.extend(ready_to_retry)
 
@@ -2303,8 +2332,8 @@ class GiftOperations(commands.Cog):
                     await asyncio.sleep(random.uniform(MEMBER_PROCESS_DELAY * 0.7, MEMBER_PROCESS_DELAY * 1.3))
                     response_status = await self.claim_giftcode_rewards_wos(fid, giftcode)
                 except Exception as claim_err:
-                     self.logger.exception(f"GiftOps: Unexpected error during claim for {fid}: {claim_err}")
-                     response_status = "ERROR"
+                    self.logger.exception(f"GiftOps: Unexpected error during claim for {fid}: {claim_err}")
+                    response_status = "ERROR"
 
                 # Handle Response
                 mark_processed = False
@@ -2332,17 +2361,17 @@ class GiftOperations(commands.Cog):
                     fail_reason = "API Rate Limited"
                     next_cycle_count = current_cycle_count
                 elif response_status in ["CAPTCHA_INVALID", "MAX_CAPTCHA_ATTEMPTS_REACHED", "OCR_FAILED_ATTEMPT"]:
-                     next_cycle_count = current_cycle_count + 1
-                     if next_cycle_count < MAX_RETRY_CYCLES:
-                         queue_for_retry = True
-                         retry_delay = CAPTCHA_CYCLE_COOLDOWN
-                         fail_reason = "Captcha Cycle Failed"
-                         self.logger.info(f"GiftOps: FID {fid} failed captcha cycle {next_cycle_count}. Queuing for retry cycle {next_cycle_count + 1} in {retry_delay}s.")
-                     else:
-                         add_to_failed = True
-                         mark_processed = True
-                         fail_reason = f"Failed after {MAX_RETRY_CYCLES} captcha cycles (Last Status: {response_status})"
-                         self.logger.info(f"GiftOps: Max ({MAX_RETRY_CYCLES}) retry cycles reached for FID {fid}. Marking as failed.")
+                    next_cycle_count = current_cycle_count + 1
+                    if next_cycle_count < MAX_RETRY_CYCLES:
+                        queue_for_retry = True
+                        retry_delay = CAPTCHA_CYCLE_COOLDOWN
+                        fail_reason = "Captcha Cycle Failed"
+                        self.logger.info(f"GiftOps: FID {fid} failed captcha cycle {next_cycle_count}. Queuing for retry cycle {next_cycle_count + 1} in {retry_delay}s.")
+                    else:
+                        add_to_failed = True
+                        mark_processed = True
+                        fail_reason = f"Failed after {MAX_RETRY_CYCLES} captcha cycles (Last Status: {response_status})"
+                        self.logger.info(f"GiftOps: Max ({MAX_RETRY_CYCLES}) retry cycles reached for FID {fid}. Marking as failed.")
 
                 # Update State Based on Outcome
                 if mark_processed:
@@ -2351,26 +2380,35 @@ class GiftOperations(commands.Cog):
                         failed_count += 1
                         failed_users_dict[fid] = (nickname, fail_reason, next_cycle_count)
                 elif queue_for_retry:
-                     retry_after_ts = time.time() + retry_delay
-                     retry_queue.append((fid, nickname, next_cycle_count, retry_after_ts))
+                    retry_after_ts = time.time() + retry_delay
+                    retry_queue.append((fid, nickname, next_cycle_count, retry_after_ts))
 
 
                 # Update Embed Periodically
                 current_time = time.time()
                 if current_time - last_embed_update > 5:
-                     embed.description = update_embed_description()
-                     try:
-                         await status_message.edit(embed=embed)
-                         last_embed_update = current_time
-                     except Exception as embed_edit_err:
-                         self.logger.warning(f"GiftOps: WARN - Failed to edit progress embed: {embed_edit_err}")
+                    embed.description = update_embed_description()
+                    try:
+                        await status_message.edit(embed=embed)
+                        last_embed_update = current_time
+                    except Exception as embed_edit_err:
+                        self.logger.warning(f"GiftOps: WARN - Failed to edit progress embed: {embed_edit_err}")
 
             # Final Embed Update
+            self.logger.info(f"GiftOps: Alliance {alliance_id} processing loop finished. Preparing final update.")
             embed.title = f"🎁 Gift Code Process Complete: {giftcode}"
             embed.color = discord.Color.green() if failed_count == 0 else discord.Color.orange() if success_count > 0 else discord.Color.red()
             embed.description = update_embed_description()
-            try: await status_message.edit(embed=embed)
-            except Exception as final_embed_err: self.logger.warning(f"GiftOps: WARN - Failed to edit final progress embed: {final_embed_err}")
+
+            try:
+                await status_message.edit(embed=embed)
+                self.logger.info(f"GiftOps: Successfully edited final status embed for alliance {alliance_id}.")
+            except discord.NotFound:
+                self.logger.warning(f"GiftOps: WARN - Failed to edit final progress embed for alliance {alliance_id}: Original message not found.")
+            except discord.Forbidden:
+                 self.logger.warning(f"GiftOps: WARN - Failed to edit final progress embed for alliance {alliance_id}: Missing permissions.")
+            except Exception as final_embed_err:
+                self.logger.exception(f"GiftOps: WARN - Failed to edit final progress embed for alliance {alliance_id}: {final_embed_err}")
 
             summary_lines = [
                 "\n",
@@ -2397,7 +2435,7 @@ class GiftOperations(commands.Cog):
             if failed_users_dict:
                 summary_lines.append(f"\nFailed Users ({len(failed_users_dict)}):")
                 for fid, (nick, reason, cycles) in failed_users_dict.items():
-                     summary_lines.append(f"- {nick} ({fid}): {reason} (Cycles Attempted: {cycles})")
+                    summary_lines.append(f"- {nick} ({fid}): {reason} (Cycles Attempted: {cycles})")
 
             summary_lines.append("--- Redemption Summary End ---\n")
             summary_log_message = "\n".join(summary_lines)
@@ -2436,125 +2474,157 @@ class CreateGiftCodeModal(discord.ui.Modal):
         code = self.giftcode.value
         logger.info(f"[CreateGiftCodeModal] Code entered: {code}")
 
-        try:
-            logger.info(f"[CreateGiftCodeModal] Calling claim_giftcode_rewards_wos for code: {code}")
-            status = await self.cog.claim_giftcode_rewards_wos("244886619", code)
-            logger.info(f"[CreateGiftCodeModal] claim_giftcode_rewards_wos returned status: {status}")
+        MAX_VALIDATION_ATTEMPTS = 4
+        RETRY_DELAY_SECONDS = 5
+        RATE_LIMIT_DELAY_SECONDS = 60
+        validation_fid = "244886619"
+        final_status = "PENDING"
+        attempt_count = 0
 
-            embed = discord.Embed(title="🎁 Gift Code Creation")
+        current_time = time.time()
+        if current_time - self.cog.last_validation_attempt_time < self.cog.validation_cooldown:
+            wait_time = self.cog.validation_cooldown - (current_time - self.cog.last_validation_attempt_time)
+            logger.info(f"[CreateGiftCodeModal] Validation cooldown active. Waiting {wait_time:.1f}s before starting validation for '{code}'.")
+            await asyncio.sleep(wait_time)
 
-            if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
-                logger.info(f"[CreateGiftCodeModal] Status is SUCCESS/RECEIVED/SAME TYPE for {code}.")
-                self.cog.cursor.execute("SELECT 1 FROM gift_codes WHERE giftcode = ?", (code,))
-                if not self.cog.cursor.fetchone():
-                    logger.info(f"[CreateGiftCodeModal] Code {code} is new. Inserting into DB.")
-                    date = datetime.now().strftime("%Y-%m-%d")
+        async with self.cog._validation_lock:
+            self.cog.last_validation_attempt_time = time.time()
+            logger.info(f"[CreateGiftCodeModal] Acquired validation lock for '{code}'.")
+
+            for attempt in range(MAX_VALIDATION_ATTEMPTS):
+                attempt_count = attempt + 1
+                logger.info(f"[CreateGiftCodeModal] Attempt {attempt_count}/{MAX_VALIDATION_ATTEMPTS} to validate code: {code}")
+                status = "INIT" # Default status for the attempt
+
+                try:
+                    progress_embed = discord.Embed(
+                        title=f"🎁 Validating Gift Code: `{code}`",
+                        description=f"Attempt {attempt_count}/{MAX_VALIDATION_ATTEMPTS}...",
+                        color=discord.Color.blue()
+                    )
                     try:
-                        self.cog.cursor.execute(
-                            "INSERT INTO gift_codes (giftcode, date) VALUES (?, ?)",
-                            (code, date)
-                        )
-                        self.cog.conn.commit()
-                        logger.info(f"[CreateGiftCodeModal] Code '{code}' inserted successfully.")
+                        await interaction.edit_original_response(embed=progress_embed)
+                    except discord.NotFound:
+                        logger.warning("[CreateGiftCodeModal] Original interaction message not found, cannot update progress.")
+                    except Exception as edit_err:
+                        logger.warning(f"[CreateGiftCodeModal] Failed to edit progress embed: {edit_err}")
 
-                        try:
-                            logger.info(f"[CreateGiftCodeModal] Creating task to add code '{code}' to API.")
-                            asyncio.create_task(self.cog.api.add_giftcode(code))
-                            logger.info(f"[CreateGiftCodeModal] API add task created for '{code}'.")
-                        except Exception as api_err:
-                            logger.exception(f"[CreateGiftCodeModal] Error creating task for api.add_giftcode for '{code}': {api_err}")
+                    status = await self.cog.claim_giftcode_rewards_wos(validation_fid, code)
+                    logger.info(f"[CreateGiftCodeModal] Attempt {attempt_count} result for '{code}': {status}")
+                    final_status = status
 
-                        embed.title = "✅ Gift Code Created"
-                        embed.description = (
-                            f"**Gift Code Details**\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🎁 **Gift Code:** `{code}`\n"
-                            f"✅ **Status:** Successfully created and added.\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                        )
-                        embed.color = discord.Color.green()
+                    if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+                        logger.info(f"[CreateGiftCodeModal] Validation successful (Status: {status}).")
+                        break
+                    elif status in ["TIME_ERROR", "CDK_NOT_FOUND", "USAGE_LIMIT"]:
+                        logger.warning(f"[CreateGiftCodeModal] Definitive failure (Status: {status}). Stopping attempts.")
+                        break
+                    elif status in ["TIMEOUT_RETRY", "CAPTCHA_INVALID", "OCR_FAILED_ATTEMPT", "MAX_CAPTCHA_ATTEMPTS_REACHED", "ERROR", "CAPTCHA_FETCH_ERROR", "LOGIN_FAILED", "LOGIN_EXPIRED_MID_PROCESS", "UNKNOWN_API_RESPONSE", "OCR_DISABLED", "SOLVER_ERROR"]:
+                        if attempt < MAX_VALIDATION_ATTEMPTS - 1:
+                            delay = RATE_LIMIT_DELAY_SECONDS if status == "TIMEOUT_RETRY" else RETRY_DELAY_SECONDS
+                            logger.info(f"[CreateGiftCodeModal] Temporary failure (Status: {status}). Will wait {delay}s before retry.")
+                            progress_embed.description = f"Attempt {attempt_count}/{MAX_VALIDATION_ATTEMPTS} failed ({status}). Retrying in {delay}s..."
+                            progress_embed.color = discord.Color.orange()
+                            try:
+                                await interaction.edit_original_response(embed=progress_embed)
+                            except Exception as edit_err_retry:
+                                logger.warning(f"[CreateGiftCodeModal] Failed to edit progress embed before retry sleep: {edit_err_retry}")
 
-                    except sqlite3.Error as db_err:
-                         logger.exception(f"[CreateGiftCodeModal] Error inserting gift code '{code}' (DB Insert): {db_err}")
-                         embed.title = "❌ Database Error"
-                         embed.description = f"Failed to save gift code `{code}` to the database. Please check logs."
-                         embed.color = discord.Color.red()
+                            logger.info(f"[CreateGiftCodeModal] Starting sleep for {delay}s...")
+                            await asyncio.sleep(delay)
+                            logger.info(f"[CreateGiftCodeModal] Sleep finished. Executing 'continue' for next attempt.")
+                            continue
+                        else:
+                            logger.warning(f"[CreateGiftCodeModal] Max attempts reached after temporary failure (Status: {status}).")
+                            break
+                    else:
+                        logger.error(f"[CreateGiftCodeModal] Unhandled status '{status}' during validation loop.")
+                        break
 
-                else:
-                    logger.info(f"[CreateGiftCodeModal] Code {code} already exists in DB.")
-                    embed.title = "ℹ️ Gift Code Exists"
-                    embed.description = (
+                except Exception as e:
+                    logger.exception(f"[CreateGiftCodeModal] Exception during validation attempt {attempt_count} for '{code}': {e}")
+                    final_status = "EXCEPTION_DURING_VALIDATION"
+                    logger.error("[CreateGiftCodeModal] Breaking loop due to exception during attempt.")
+                    break
+
+            logger.info(f"[CreateGiftCodeModal] Finished validation attempts for '{code}'. Final determined status: {final_status}")
+
+        logger.info(f"[CreateGiftCodeModal] Released validation lock for '{code}'.")
+
+        final_embed = discord.Embed(title="🎁 Gift Code Creation Result")
+        if final_status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+            self.cog.cursor.execute("SELECT 1 FROM gift_codes WHERE giftcode = ?", (code,))
+            if not self.cog.cursor.fetchone():
+                logger.info(f"[CreateGiftCodeModal] Code {code} is new and valid. Inserting into DB.")
+                date = datetime.now().strftime("%Y-%m-%d")
+                try:
+                    self.cog.cursor.execute(
+                        "INSERT INTO gift_codes (giftcode, date) VALUES (?, ?)",
+                        (code, date)
+                    )
+                    self.cog.conn.commit()
+                    logger.info(f"[CreateGiftCodeModal] Code '{code}' inserted successfully.")
+
+                    # Trigger API add
+                    try:
+                        asyncio.create_task(self.cog.api.add_giftcode(code))
+                        logger.info(f"[CreateGiftCodeModal] API add task created for '{code}'.")
+                    except Exception as api_err:
+                        logger.exception(f"[CreateGiftCodeModal] Error creating task for api.add_giftcode for '{code}': {api_err}")
+
+                    final_embed.title = "✅ Gift Code Created"
+                    final_embed.description = (
                         f"**Gift Code Details**\n━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🎁 **Gift Code:** `{code}`\n"
-                        f"❌ **Status:** Already exists in database.\n"
+                        f"✅ **Status:** Successfully validated and added.\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
                     )
-                    embed.color = discord.Color.blue()
+                    final_embed.color = discord.Color.green()
 
-            elif status == "TIME_ERROR":
-                logger.warning(f"[CreateGiftCodeModal] Code {code} reported as expired.")
-                embed.title = "❌ Invalid Code"
-                embed.description = (
-                    f"**Gift Code Details**\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🎁 **Gift Code:** `{code}`\n"
-                    f"❌ **Status:** Gift code has expired.\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                )
-                embed.color = discord.Color.red()
-
-            elif status == "CDK_NOT_FOUND":
-                logger.warning(f"[CreateGiftCodeModal] Code {code} reported as not found.")
-                embed.title = "❌ Invalid Code"
-                embed.description = (
-                    f"**Gift Code Details**\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🎁 **Gift Code:** `{code}`\n"
-                    f"❌ **Status:** Invalid gift code.\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                )
-                embed.color = discord.Color.red()
-
-            elif status == "USAGE_LIMIT":
-                logger.warning(f"[CreateGiftCodeModal] Code {code} reported as usage limit reached.")
-                embed.title = "❌ Invalid Code"
-                embed.description = (
-                    f"**Gift Code Details**\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🎁 **Gift Code:** `{code}`\n"
-                    f"❌ **Status:** Usage limit has been reached.\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                )
-                embed.color = discord.Color.red()
+                except sqlite3.Error as db_err:
+                    logger.exception(f"[CreateGiftCodeModal] DB Error inserting validated code '{code}': {db_err}")
+                    final_embed.title = "❌ Database Error"
+                    final_embed.description = f"Failed to save validated gift code `{code}` to the database. Please check logs."
+                    final_embed.color = discord.Color.red()
             else:
-                logger.warning(f"[CreateGiftCodeModal] Unhandled status '{status}' for code {code}.")
-                embed.title = "⚠️ Validation Warning"
-                embed.description = (
+                logger.info(f"[CreateGiftCodeModal] Valid code {code} already exists in DB.")
+                final_embed.title = "ℹ️ Gift Code Exists"
+                final_embed.description = (
                     f"**Gift Code Details**\n━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"🎁 **Gift Code:** `{code}`\n"
-                    f"⚠️ **Status:** Could not definitively validate the code status (`{status}`). It was **not** added. Please check logs or try again later.\n"
+                    f"✅ **Status:** Code is valid, but already exists in database.\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 )
-                embed.color = discord.Color.orange()
+                final_embed.color = discord.Color.blue()
 
-            logger.info(f"[CreateGiftCodeModal] Attempting to send followup for code {code} with status {status}.")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            logger.info(f"[CreateGiftCodeModal] Followup sent successfully for code {code}.")
-
-        except sqlite3.IntegrityError:
-            logger.error(f"[CreateGiftCodeModal] IntegrityError for code {code} - Already exists (should have been caught).")
-            await interaction.followup.send(
-                "❌ This gift code already exists in the database!",
-                ephemeral=True
+        elif final_status in ["TIME_ERROR", "CDK_NOT_FOUND", "USAGE_LIMIT"]:
+            final_embed.title = "❌ Invalid Code"
+            reason = "expired" if final_status == "TIME_ERROR" else \
+                    "incorrect/not found" if final_status == "CDK_NOT_FOUND" else \
+                    "usage limit reached"
+            final_embed.description = (
+                f"**Gift Code Details**\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎁 **Gift Code:** `{code}`\n"
+                f"❌ **Status:** Validation failed - code is {reason}.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
             )
-        except Exception as e:
-            logger.exception(f"[CreateGiftCodeModal] Uncaught exception processing code {code}: {e}")
-            try:
-                await interaction.followup.send(
-                    "❌ An unexpected error occurred while processing the gift code creation. Please check bot logs.",
-                    ephemeral=True
-                )
-            except Exception as followup_err:
-                logger.error(f"[CreateGiftCodeModal] Failed to send error followup to user: {followup_err}")
+            final_embed.color = discord.Color.red()
+
+        else:
+            final_embed.title = "⚠️ Validation Failed"
+            final_embed.description = (
+                f"**Gift Code Details**\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎁 **Gift Code:** `{code}`\n"
+                f"❌ **Status:** Could not validate the code after {attempt_count} attempts (Last Status: `{final_status}`). The code was **not** added.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+            final_embed.color = discord.Color.orange()
+
+        try:
+            await interaction.edit_original_response(embed=final_embed)
+            logger.info(f"[CreateGiftCodeModal] Final result embed sent for code {code}.")
+        except Exception as final_edit_err:
+            logger.exception(f"[CreateGiftCodeModal] Failed to edit interaction with final result for {code}: {final_edit_err}")
 
 class DeleteGiftCodeModal(discord.ui.Modal, title="Delete Gift Code"):
     def __init__(self, cog):
@@ -3066,9 +3136,9 @@ class OCRSettingsView(discord.ui.View):
 
             # Select Menu for Image Saving
             elif isinstance(item, discord.ui.Select) and item.custom_id == "image_save_select":
-                 item.disabled = self.disable_controls
-                 for option in item.options:
-                     option.default = (str(self.save_images_setting) == option.value)
+                item.disabled = self.disable_controls
+                for option in item.options:
+                    option.default = (str(self.save_images_setting) == option.value)
 
 
     # Row 0: Enable/Disable OCR, Toggle GPU
@@ -3120,8 +3190,8 @@ class OCRSettingsView(discord.ui.View):
     async def image_save_select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
         select.disabled = self.disable_controls
         if not self.libraries_installed:
-             await interaction.response.send_message("❌ Required libraries are not installed.", ephemeral=True)
-             return
+            await interaction.response.send_message("❌ Required libraries are not installed.", ephemeral=True)
+            return
 
         await interaction.response.defer(ephemeral=True)
         try:
@@ -3130,7 +3200,7 @@ class OCRSettingsView(discord.ui.View):
             await interaction.followup.send(f"{'✅' if success else '❌'} {message}", ephemeral=True)
             await self.cog.show_ocr_settings(interaction)
         except ValueError:
-             await interaction.followup.send("❌ Invalid selection value.", ephemeral=True)
+            await interaction.followup.send("❌ Invalid selection value.", ephemeral=True)
         except Exception as e:
             self.cog.logger.exception("Error processing image save selection.")
             await interaction.followup.send("❌ An error occurred while updating image saving settings.", ephemeral=True)
@@ -3313,7 +3383,7 @@ class ImageSaveSelect(discord.ui.Select):
             )
             await self.cog.show_ocr_settings(interaction)
         except ValueError:
-             await interaction.followup.send("❌ Invalid selection value.", ephemeral=True)
+            await interaction.followup.send("❌ Invalid selection value.", ephemeral=True)
         except Exception as e:
             self.cog.logger.exception("Error processing image save selection.")
             await interaction.followup.send("❌ An error occurred while updating image saving settings.", ephemeral=True)
