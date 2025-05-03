@@ -54,7 +54,7 @@ If your CPU does not support AVX instructions, PyTorch will fail with `Illegal i
         *   `main.py`
         *   `cogs/gift_operations.py`
         *   `cogs/gift_captchasolver.py` (This is a new file)
-    *   [Click here to download Patch Files](https://github.com/justncodes/Whiteout-Survival-Discord-Bot/releases/download/v1.0.0/1.0.0-Gift-Code-OCR.zip)
+    *   [Click here to download Patch Files](https://github.com/justncodes/Whiteout-Survival-Discord-Bot/releases/download/v1.0.5/1.0.5-Gift-Code-OCR.zip)
 
 5.  **🔄 Replace/Add Files:**
     *   Go to your bot's main directory.
