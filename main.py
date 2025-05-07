@@ -1,11 +1,12 @@
+from colorama import Fore, Style, init
+import subprocess
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
+import shutil
 import sys
 import os
-import subprocess
-import time
-from colorama import Fore, Style, init
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 init(autoreset=True) # Initialize colorama
 
 try:
@@ -79,7 +80,7 @@ def check_and_install_requirements():
                 installed_packages = set(installed_packages_dict.keys())
                 installation_happened = True
             except subprocess.TimeoutExpired:
-                print(f"Warning: Uninstallation of old packages timed out.")
+                print("Warning: Uninstallation of old packages timed out.")
             except subprocess.CalledProcessError as e:
                 print(f"Warning: Error during uninstallation of old packages: {e}. Please check manually.")
             except Exception as e:
@@ -202,7 +203,7 @@ def check_and_install_requirements():
                 try:
                     subprocess.check_call(uninstall_cmd, timeout=300)
                 except Exception:
-                    print(f"Warning: Failed to run uninstall command for opencv packages.")
+                    print("Warning: Failed to run uninstall command for opencv packages.")
 
                 install_cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", opencv_headless_key]
                 try:
@@ -231,7 +232,7 @@ if __name__ == "__main__":
     import requests
     import asyncio
 
-    VERSION_URL = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/autoupdateinfo.txt"
+    VERSION_URL = "https://raw.githubusercontent.com/whiteout-project/bot/refs/heads/main/auto_update"
 
     def restart_bot():
         print(Fore.YELLOW + "\nRestarting bot..." + Style.RESET_ALL)
@@ -257,20 +258,13 @@ if __name__ == "__main__":
             try:
                 response = requests.get(VERSION_URL)
                 if response.status_code == 200:
-                    source_url = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main"
+                    source_url = "https://raw.githubusercontent.com/whiteout-project/bot/refs/heads/main"
                     print(Fore.GREEN + "Connected to GitHub successfully." + Style.RESET_ALL)
                 else:
                     raise requests.RequestException
             except requests.RequestException:
-                print(Fore.YELLOW + "Cannot connect to GitHub, trying alternative source (wosland.com)..." + Style.RESET_ALL)
-                alt_version_url = "https://wosland.com/wosdc/autoupdateinfo.txt"
-                response = requests.get(alt_version_url)
-                if response.status_code == 200:
-                    source_url = "https://wosland.com/wosdc"
-                    print(Fore.GREEN + "Connected to wosland.com successfully." + Style.RESET_ALL)
-                else:
-                    print(Fore.RED + "Failed to connect to both GitHub and wosland.com" + Style.RESET_ALL)
-                    return False
+                print(Fore.RED + "Failed to connect to GitHub" + Style.RESET_ALL)
+                return False
 
             if not os.path.exists('cogs'):
                 os.makedirs('cogs')
@@ -337,6 +331,19 @@ if __name__ == "__main__":
                     response = input("\nDo you want to update now? (y/n): ").lower()
                     if response == 'y':
                         needs_restart = False
+                        
+                        if os.path.exists("db") and os.path.isdir("db"):
+                            print(Fore.YELLOW + "Making backup of database..." + Style.RESET_ALL)
+                            
+                            if os.path.exists("db.bak"):
+                                shutil.rmtree("db.bak")
+                                
+                            os.mkdir("db.bak")
+                            
+                            for file in os.listdir("db"):
+                                shutil.copy(os.path.join("db", file), os.path.join("db.bak", file))
+                                
+                            print(Fore.GREEN + "Backup completed!" + Style.RESET_ALL)
                         
                         for file_name, new_version in updates_needed:
                             if file_name.strip() != 'main.py':
@@ -524,7 +531,7 @@ if __name__ == "__main__":
     async def on_ready():
         try:
             print(f"{Fore.GREEN}Logged in as {Fore.CYAN}{bot.user}{Style.RESET_ALL}")
-            synced = await bot.tree.sync()
+            await bot.tree.sync()
         except Exception as e:
             print(f"Error syncing commands: {e}")
 
