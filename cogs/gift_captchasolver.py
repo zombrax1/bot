@@ -1,354 +1,176 @@
 #!/usr/bin/env python3
 # Gift Captcha Solver for WOS Discord Bot
+# Version 2 - now with ddddocr
 
 import os
 import warnings
 import base64
 import io
 import time
-import easyocr
-import cv2
-import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
-from datetime import datetime
 import traceback
 import logging
 import logging.handlers
 
-# Suppress PyTorch warnings
-warnings.filterwarnings("ignore", message=".*pin_memory.*", category=UserWarning)
+try:
+    import ddddocr
+    DDDDOCR_AVAILABLE = True
+except ImportError:
+    ddddocr = None
+    DDDDOCR_AVAILABLE = False
 
 class GiftCaptchaSolver:
-    def __init__(self, use_gpu=False, gpu_device=None, save_images=False):
+    def __init__(self, save_images=0):
         """
-        Initialize the OCR captcha solver.
-        
+        Initialize the ddddocr captcha solver.
+
         Args:
-            use_gpu (bool): Whether to use GPU for OCR.
-            gpu_device (int, optional): GPU device ID to use.
             save_images (int): Image saving mode (0=None, 1=Failed, 2=Success, 3=All).
+                               Note: Saving logic is primarily handled in gift_operations.py now.
         """
-        self.use_gpu = use_gpu
-        self.gpu_device = gpu_device
         self.save_images_mode = save_images
-        self.min_confidence = 0.4
+        self.ddddocr_reader = None
+        self.is_initialized = False
 
-        # Logger setup for gift_solver.txt
+        # Logger setup
         self.logger = logging.getLogger("gift_solver")
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
-
-        log_dir = 'log'
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-
-        log_file = os.path.join(log_dir, 'gift_solver.txt')
-        handler = logging.handlers.RotatingFileHandler(
-            log_file, maxBytes=3 * 1024 * 1024, backupCount=3, encoding='utf-8')
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-
         if not self.logger.hasHandlers():
+            self.logger.setLevel(logging.INFO)
+            self.logger.propagate = False
+            log_dir = 'log'
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, 'gift_solver.txt')
+            handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=3 * 1024 * 1024, backupCount=3, encoding='utf-8')
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
             self.logger.addHandler(handler)
 
-        # Set up captcha image directory
         self.captcha_dir = 'captcha_images'
         os.makedirs(self.captcha_dir, exist_ok=True)
-        
-        # Initialize OCR based on GPU settings
+
         self._initialize_ocr()
-        
-        # OCR statistics
+
         self.stats = {
             "total_attempts": 0,
-            "successful_decodes": 0, 
-            "first_try_success": 0,
-            "retries": 0,
+            "successful_decodes": 0,
             "failures": 0
         }
         self.reset_run_stats()
-    
+
     def reset_run_stats(self):
         """Reset statistics for the current run."""
         self.run_stats = {
             "total_attempts": 0,
-            "successful_decodes": 0, 
-            "first_try_success": 0,
-            "retries": 0,
+            "successful_decodes": 0,
             "failures": 0,
             "start_time": time.time()
         }
-    
+
     def get_run_stats_report(self):
         """Get a formatted report of run statistics."""
         duration = time.time() - self.run_stats["start_time"]
-        
         success_rate = 0
         if self.run_stats["total_attempts"] > 0:
             success_rate = (self.run_stats["successful_decodes"] / self.run_stats["total_attempts"]) * 100
-            
-        first_try_rate = 0
-        if self.run_stats["successful_decodes"] > 0:
-            first_try_rate = (self.run_stats["first_try_success"] / self.run_stats["successful_decodes"]) * 100
-            
-        avg_attempts = 0
-        if self.run_stats["successful_decodes"] > 0:
-            avg_attempts = (self.run_stats["total_attempts"] / self.run_stats["successful_decodes"])
-        
+
         report = [
             "\n=== Captcha Solver Statistics ===",
             f"Total captcha attempts: {self.run_stats['total_attempts']}",
             f"Successful decodes: {self.run_stats['successful_decodes']}",
-            f"First attempt success: {self.run_stats['first_try_success']}",
-            f"Retries needed: {self.run_stats['retries']}",
-            f"Complete failures: {self.run_stats['failures']}",
+            f"Failures: {self.run_stats['failures']}",
             f"Success rate: {success_rate:.2f}%",
-            f"First try success rate: {first_try_rate:.2f}%",
-            f"Average attempts per success: {avg_attempts:.2f}",
             f"Processing time: {duration:.2f} seconds",
-            "=================================="
+            "=========================================="
         ]
-        
         return "\n".join(report)
-    
+
     def _initialize_ocr(self):
-        """Initialize the EasyOCR reader based on GPU settings."""
+        """Initialize the DdddOcr reader and verify basic functionality."""
+        if not DDDDOCR_AVAILABLE:
+            self.logger.error("DdddOcr library not found. Captcha solving disabled.")
+            self.is_initialized = False
+            return
+
         try:
-            if self.use_gpu:
-                import torch
-                try:
-                    if self.gpu_device is not None:
-                        torch.cuda.set_device(self.gpu_device)
-                    gpu_name = torch.cuda.get_device_name(self.gpu_device or 0)
-                    self.logger.info(f"Captcha Solver: Using GPU device {self.gpu_device or 0}: {gpu_name}")
-                    self.reader = easyocr.Reader(['en'], gpu=True)
-                except Exception as e:
-                    self.logger.warning(f"Captcha Solver: GPU error: {str(e)}. Falling back to CPU.")
-                    self.reader = easyocr.Reader(['en'], gpu=False)
-            else:
-                self.logger.info("Captcha Solver: Using CPU only (no GPU acceleration)")
-                self.reader = easyocr.Reader(['en'], gpu=False)
+            self.logger.info("Initializing DdddOcr...")
+            self.ddddocr_reader = ddddocr.DdddOcr(ocr=True, det=False, show_ad=False)
+            self.logger.info("DdddOcr object created. Performing test classification...")
+            try:
+                from PIL import Image
+                import numpy as np
+                dummy_img = Image.new('RGB', (60, 30), color = 'black')
+                import io
+                img_byte_arr = io.BytesIO()
+                dummy_img.save(img_byte_arr, format='PNG')
+                img_bytes = img_byte_arr.getvalue()
+                test_result = self.ddddocr_reader.classification(img_bytes)
+                self.logger.info(f"DdddOcr test classification successful (Result: '{test_result}'). Initialization complete.")
+                self.is_initialized = True
+            except ImportError:
+                 self.logger.error("Pillow library not found, cannot perform DdddOcr init test. Assuming success if object created.")
+                 self.is_initialized = True
+            except Exception as test_e:
+                 self.logger.error(f"DdddOcr test classification failed: {test_e}. Marking initialization as failed.")
+                 self.is_initialized = False
+                 self.ddddocr_reader = None
         except Exception as e:
-            self.logger.exception(f"Captcha Solver: Error initializing EasyOCR: {str(e)}")
-            self.logger.exception("Captcha Solver: Make sure you have the required libraries installed:")
-            self.logger.exception("pip install easyocr torch opencv-python pillow")
-            raise
+            self.logger.exception(f"Failed during DdddOcr object creation: {e}")
+            self.ddddocr_reader = None
+            self.is_initialized = False
     
-    def preprocess_captcha(self, image):
+    async def solve_captcha(self, image_bytes, fid=None, attempt=0):
         """
-        Apply multiple preprocessing techniques to the image to improve OCR accuracy.
-        
+        Attempts to solve captcha using ddddocr.
+
         Args:
-            image: Either a PIL Image or numpy array representing the captcha image.
-            
+            image_bytes (bytes): The raw byte data of the captcha image.
+            fid (optional): Player ID for logging.
+            attempt (int): Attempt number for logging.
+
         Returns:
-            list: List of tuples (method_name, processed_image)
+            tuple: (solved_code, success, method, confidence, image_path)
+                   - solved_code (str or None): The solved captcha text or None on failure.
+                   - success (bool): True if solved successfully, False otherwise.
+                   - method (str): Always "DdddOcr".
+                   - confidence (float): Always 1.0 for ddddocr success, 0.0 otherwise.
+                   - image_path (None): No longer provides a path from solver.
         """
-        # Convert PIL image to numpy array for OpenCV
-        if isinstance(image, Image.Image):
-            img_np = np.array(image)
-            # Convert RGB to BGR (OpenCV format)
-            if len(img_np.shape) > 2 and img_np.shape[2] == 3:
-                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-        else:
-            img_np = image
-            
-        processed_images = []
-        processed_images.append(("Original", img_np))
-        
-        # Method 1: Basic threshold
-        if len(img_np.shape) > 2:
-            gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = img_np
-            
-        _, thresh1 = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-        processed_images.append(("Basic Threshold", thresh1))
-        
-        # Method 2: Adaptive threshold
-        adaptive_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
-        processed_images.append(("Adaptive Threshold", adaptive_thresh))
-        
-        # Method 3: Otsu's thresholding
-        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-        processed_images.append(("Otsu Threshold", otsu))
-        
-        # Method 4: Noise removal
-        denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
-        processed_images.append(("Denoised", denoised))
-        
-        # Method 5: Noise removal + threshold
-        _, denoised_thresh = cv2.threshold(denoised, 127, 255, cv2.THRESH_BINARY)
-        processed_images.append(("Denoised+Threshold", denoised_thresh))
-        
-        # Method 6: Dilated
-        kernel = np.ones((2,2), np.uint8)
-        dilated = cv2.dilate(gray, kernel, iterations=1)
-        processed_images.append(("Dilated", dilated))
-        
-        # Method 7: Eroded
-        eroded = cv2.erode(gray, kernel, iterations=1)
-        processed_images.append(("Eroded", eroded))
-        
-        # Method 8: Edge enhancement
-        edges = cv2.Canny(gray, 100, 200)
-        processed_images.append(("Edges", edges))
-        
-        # Method 9: Morphological operations
-        kernel = np.ones((1,1), np.uint8)
-        opening = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
-        processed_images.append(("Opening", opening))
-        
-        # Method 10: Enhanced contrast
-        if isinstance(image, Image.Image):
-            pil_img = image
-        else:
-            if len(img_np.shape) > 2 and img_np.shape[2] == 3:
-                pil_img = Image.fromarray(cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB))
-            else:
-                pil_img = Image.fromarray(img_np)
-                
-        enhanced = ImageEnhance.Contrast(pil_img).enhance(2.0)
-        enhanced_np = np.array(enhanced)
-        if len(enhanced_np.shape) > 2 and enhanced_np.shape[2] == 3:
-            enhanced_np = cv2.cvtColor(enhanced_np, cv2.COLOR_RGB2BGR)
-        processed_images.append(("Enhanced Contrast", enhanced_np))
-        
-        # Method 11: Sharpened
-        sharpened = pil_img.filter(ImageFilter.SHARPEN)
-        sharpened_np = np.array(sharpened)
-        if len(sharpened_np.shape) > 2 and sharpened_np.shape[2] == 3:
-            sharpened_np = cv2.cvtColor(sharpened_np, cv2.COLOR_RGB2BGR)
-        processed_images.append(("Sharpened", sharpened_np))
-        
-        # Method 12: Color filtering (for captchas with specific color text)
-        if len(img_np.shape) > 2 and img_np.shape[2] == 3:
-            # Extract blue channel
-            blue_channel = img_np[:, :, 0]
-            _, blue_thresh = cv2.threshold(blue_channel, 127, 255, cv2.THRESH_BINARY)
-            processed_images.append(("Blue Channel", blue_thresh))
-            
-            # Create an HSV version and filter for common captcha colors
-            hsv = cv2.cvtColor(img_np, cv2.COLOR_BGR2HSV)
-            
-            # Purple-blue range
-            lower_purple = np.array([100, 50, 50])
-            upper_purple = np.array([170, 255, 255])
-            purple_mask = cv2.inRange(hsv, lower_purple, upper_purple)
-            processed_images.append(("Purple Filter", purple_mask))
-            
-            # Green range
-            lower_green = np.array([40, 50, 50])
-            upper_green = np.array([90, 255, 255])
-            green_mask = cv2.inRange(hsv, lower_green, upper_green)
-            processed_images.append(("Green Filter", green_mask))
-        
-        return processed_images
-    
-    def save_captcha_image(self, img_np, fid, attempt, captcha_code):
-        """
-        Save a captcha image for debugging purposes.
-        
-        Args:
-            img_np: Numpy array representing the image.
-            fid: Player ID.
-            attempt: Attempt number.
-            captcha_code: Recognized captcha code.
-            
-        Returns:
-            str: Path to the saved image, or None if saving failed.
-        """
-        if self.save_images_mode == 0:
-            return None
-            
+        if not self.is_initialized or not self.ddddocr_reader:
+            self.logger.error(f"DdddOcr not initialized. Cannot solve captcha for FID {fid}.")
+            return None, False, "DdddOcr", 0.0, None
+
+        self.stats["total_attempts"] += 1
+        self.run_stats["total_attempts"] += 1
+        start_time = time.time()
+
         try:
-            timestamp = int(time.time())
-            safe_captcha_code = "".join(c if c.isalnum() else "_" for c in str(captcha_code))
-            image_filename = f"fid{fid}_try{attempt}_OCR_{safe_captcha_code}_{timestamp}.png"
-            full_path = os.path.join(self.captcha_dir, image_filename)
-            
-            if cv2.imwrite(full_path, img_np):
-                return full_path
-            else:
-                self.logger.error(f"Captcha Solver: Failed to write image file (cv2.imwrite returned False) to path: {full_path}")
-                return None
-        except Exception as e:
-            self.logger.exception(f"Captcha Solver: Exception during saving captcha image: {str(e)}")
-            return None
-    
-    async def solve_captcha(self, image_base64, fid=None, attempt=0):
-        ocr_success = False
-        temp_path = None
-        try:
-            if image_base64.startswith("data:image"):
-                image_base64 = image_base64.split(",", 1)[1]
+            EXPECTED_CAPTCHA_LENGTH = 4
+            VALID_CHARACTERS = set('123456789ABCDEFGHIJKLMNPQRSTUVWXYZabcdefghijklmnpqrstuvwxyz')
 
-            image_data = base64.b64decode(image_base64)
-            image = Image.open(io.BytesIO(image_data)).convert('RGB')
+            predicted_text = self.ddddocr_reader.classification(image_bytes)
 
-            timestamp = int(time.time())
-            temp_filename = f"temp_fid{fid}_try{attempt}_{timestamp}.png"
-            temp_path = os.path.join(self.captcha_dir, temp_filename)
-            image.save(temp_path)
+            solve_duration = time.time() - start_time
+            self.logger.info(f"[Solver] FID {fid}, Attempt {attempt+1}: DdddOcr raw result='{predicted_text}' ({solve_duration:.3f}s)")
 
-            preprocessed_versions = self.preprocess_captcha(image)
+            if (predicted_text and
+                isinstance(predicted_text, str) and
+                len(predicted_text) == EXPECTED_CAPTCHA_LENGTH and
+                all(c in VALID_CHARACTERS for c in predicted_text)):
 
-            best_result = None
-            best_confidence = 0.0
-            best_text = ""
-            best_method = "None"
-
-            for method, img in preprocessed_versions:
-                result = self.reader.readtext(img, detail=1)
-                for _, text, confidence in result:
-                    text = text.strip().replace(' ', '')
-                    if confidence > self.min_confidence and len(text) == 4 and text.isalnum():
-                        if confidence > best_confidence:
-                            best_confidence = confidence
-                            best_text = text
-                            best_method = method
-                            best_result = (text, method, confidence)
-
-            if best_result:
-                ocr_success = True
-
-            self.run_stats["total_attempts"] += 1
-            self.stats["total_attempts"] += 1
-            if ocr_success:
-                self.run_stats["successful_decodes"] += 1
                 self.stats["successful_decodes"] += 1
-                if attempt == 0:
-                    self.run_stats["first_try_success"] += 1
-                    self.stats["first_try_success"] += 1
-                return best_text, True, best_method, best_confidence, temp_path
+                self.run_stats["successful_decodes"] += 1
+                self.logger.info(f"[Solver] FID {fid}, Attempt {attempt+1}: Success. Solved: {predicted_text}")
+                return predicted_text, True, "DdddOcr", 1.0, None
             else:
-                self.run_stats["failures"] += 1
                 self.stats["failures"] += 1
-                if attempt > 0:
-                    self.run_stats["retries"] += 1
-                    self.stats["retries"] += 1
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except OSError:
-                        pass
-                return "", False, "None", 0.0, None
+                self.run_stats["failures"] += 1
+                self.logger.warning(f"[Solver] FID {fid}, Attempt {attempt+1}: Failed validation (Length: {len(predicted_text) if predicted_text else 'N/A'}, Chars OK: {all(c in VALID_CHARACTERS for c in predicted_text) if predicted_text else 'N/A'})")
+                return None, False, "DdddOcr", 0.0, None
 
         except Exception as e:
-            traceback.print_exc()
-            self.run_stats["total_attempts"] += 1
-            self.stats["total_attempts"] += 1
-            self.run_stats["failures"] += 1
             self.stats["failures"] += 1
-            if attempt > 0:
-                self.run_stats["retries"] += 1
-                self.stats["retries"] += 1
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
-            return "", False, "Exception", 0.0, None
-        
+            self.run_stats["failures"] += 1
+            self.logger.exception(f"[Solver] FID {fid}, Attempt {attempt+1}: Exception during ddddocr classification: {e}")
+            return None, False, "DdddOcr", 0.0, None
+
     def get_stats(self):
         """Get current OCR statistics."""
         return self.stats
