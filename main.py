@@ -78,7 +78,15 @@ if __name__ == "__main__":
     def restart_bot():
         print(Fore.YELLOW + "\nRestarting bot..." + Style.RESET_ALL)
         python = sys.executable
-        os.execl(python, python, *sys.argv)
+        script_path = os.path.abspath(sys.argv[0])
+        args = [python, script_path] + sys.argv[1:]
+
+        try: # Try subprocess.Popen first to avoid issues with blank space in the path on Windows
+            subprocess.Popen(args)
+            os._exit(0)
+        except Exception as e:
+            print(f"Error restarting: {e}")
+            os.execl(python, python, script_path, *sys.argv[1:])
         
     def install_packages(requirements_txt_path: str) -> bool:
         full_command= [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python"]
