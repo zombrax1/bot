@@ -1,5 +1,6 @@
 __pycache__
 db
+db.bak
 log
 bot_token.txt
 version
