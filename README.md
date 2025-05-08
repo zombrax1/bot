@@ -25,13 +25,11 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 
 ---
 
-## Installation Steps
+## 🚀 Installation Steps
 
-> [!NOTE]
-> There are some known issues with onnxruntime + an outdated visual c++ library. to overcome this, install the latest version of visual c++.
-
-> [!IMPORTANT]
-> The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore
+> ⚠️ **IMPORTANT ⚠️**
+> - If you run your bot on Windows, there is a known issue with onnxruntime + an outdated Visual C++ library. To overcome this, install [the latest version of Visual C++](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) and then run `main.py` again.
+> - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
 
 1.  **🛑 Stop the Bot:** Ensure your Discord bot's `main.py` script is not currently running.
 
@@ -41,7 +39,7 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 3.  **⬇️ Download Patch Files:**
     *   Download the updated Python files for the CAPTCHA patch. You will need these specific files:
         *   `main.py`
-    *   [Click here to download the patched main.py](https://github.com/whiteout-project/bot/blob/main/main.py)
+    *   [Click here and download the patched main.py](https://github.com/whiteout-project/bot/blob/main/main.py)
 
 4.  **🔄 Replace/Add Files:**
     *   Go to your bot's main directory.
@@ -77,7 +75,6 @@ If you encounter issues with this patch, reach out to the [project admins](https
 ### Version v1.0.0 (Current)
 
 - 🔁 Replaced EasyOCR with ddddocr — Faster, lighter, smarter. Like trading a fax machine for a laser cannon.
-- 🧹 Auto-cleans itself now — main.py will politely (and mercilessly) uninstall EasyOCR and its baggage. Then installs ddddocr like a boss.
 - 🛠️ Force-installs ddddocr v1.5.6 with --ignore-requires-python — Because Python 3.13 broke it, but we broke it back.
 - 🧠 Optimized gift code redemption loops — Now redeems faster while expertly dodging the rate-limit police.
 - 🔥 Removed dusty old GPU config junk — No one needed it, especially not our new friend ddddocr. It’s in a nice farm upstate with the other unused settings.
@@ -85,4 +82,5 @@ If you encounter issues with this patch, reach out to the [project admins](https
 - 🧩 Fixed "All Alliances" feature — It works now. Because @destrimna sent in the fix. MVP.
 - 📉 Trimmed log file bloat — Only keeps 1 backup now. Your hard drive can breathe a bit better.
 - 📊 Improved OCR Settings statistics page — More stats. More clarity. Slightly less shame.
-- ♻️ Fixed duplicate install checks on startup & updated main.py to work with our new repository. We pray that it works.
+- ♻️ Fixed duplicate install checks on startup & updated main.py to work with our new repository and update method. We pray that it works.
+- ⬇️ Reset the version numbering to start from 1.0.0 for a clean slate. And better vibes. Mostly for the vibes.
