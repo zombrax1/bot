@@ -1,4 +1,4 @@
-# Whiteout Discord Bot
+# Whiteout Survival Discord Bot
 
 This guide explains how to manually update your existing bot installation so that gift code redemption works again.
 
