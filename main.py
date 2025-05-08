@@ -5,6 +5,19 @@ import shutil
 import sys
 import os
 
+print("Removing unneccesary files...")
+
+if os.path.exists("V1oldbot") and os.path.isdir("V1oldbot"):
+    shutil.rmtree("V1oldbot")
+    
+if os.path.exists("V2Old") and os.path.isdir("V2Old"):
+    shutil.rmtree("V2Old")
+    
+if os.path.exists("autoupdateinfo.txt"):
+    os.remove("autoupdateinfo.txt")
+    
+print("Unneccesary files removed.")
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 init(autoreset=True) # Initialize colorama
@@ -239,160 +252,84 @@ if __name__ == "__main__":
         python = sys.executable
         os.execl(python, python, *sys.argv)
 
-    def setup_version_table():
-        try:
-            with sqlite3.connect('db/settings.sqlite') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''CREATE TABLE IF NOT EXISTS versions (
-                    file_name TEXT PRIMARY KEY,
-                    version TEXT,
-                    is_main INTEGER DEFAULT 0
-                )''')
-                conn.commit()
-                print(Fore.GREEN + "Version table created successfully." + Style.RESET_ALL)
-        except Exception as e:
-            print(Fore.RED + f"Error creating version table: {e}" + Style.RESET_ALL)
-
     async def check_and_update_files():
-        try:
-            try:
-                response = requests.get(VERSION_URL)
-                if response.status_code == 200:
-                    source_url = "https://raw.githubusercontent.com/whiteout-project/bot/refs/heads/main"
-                    print(Fore.GREEN + "Connected to GitHub successfully." + Style.RESET_ALL)
-                else:
-                    raise requests.RequestException
-            except requests.RequestException:
-                print(Fore.RED + "Failed to connect to GitHub" + Style.RESET_ALL)
-                return False
-
-            if not os.path.exists('cogs'):
-                os.makedirs('cogs')
-                print(Fore.GREEN + "cogs folder created" + Style.RESET_ALL)
-
-            content = response.text.split('\n')
-            documents = {}
-            main_py_updated = False
-
-            doc_section = False
-            for line in content:
-                if line.startswith("Documants;"):
-                    doc_section = True
-                    continue
-                elif doc_section and line.startswith("Updated Info;"):
-                    break
-                elif doc_section and '=' in line:
-                    file_name, version = [x.strip() for x in line.split('=')]
-                    documents[file_name] = version
-
-            update_notes = []
-            update_section = False
-            for line in content:
-                if line.startswith("Updated Info;"):
-                    update_section = True
-                    continue
-                if update_section and line.strip():
-                    update_notes.append(line.strip())
-
-            updates_needed = []
-            with sqlite3.connect('db/settings.sqlite') as conn:
-                cursor = conn.cursor()
+        latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
+        
+        latest_release_resp = requests.get(latest_release_url)
+        
+        if latest_release_resp.status_code == 200:
+            latest_release_data = latest_release_resp.json()
+            latest_tag = latest_release_data["tag_name"]
+            
+            if os.path.exists("version"):
+                with open("version", "r") as f:
+                    current_version = f.read().strip()
+            else:
+                current_version = "v0.0.0"
+                        
+            if current_version != latest_tag:
+                print(Fore.YELLOW + f"New version available: {latest_tag}" + Style.RESET_ALL)
+                print("Update Notes:")
+                print(latest_release_data["body"])
+                print()
                 
-                for file_name, new_version in documents.items():
-                    cursor.execute("SELECT version FROM versions WHERE file_name = ?", (file_name,))
-                    current_file_version = cursor.fetchone()
+                update = False
+                
+                if any([sys.argv[i]== "--autoupdate" for i in range(len(sys.argv))]):
+                    update = True
+                else:
+                    print("Note: If your terminal is not interactive, you can use the --autoupdate argument to skip this prompt.")
+                    ask = input("Do you want to update? (y/n): ").strip().lower()
+                    update = ask == "y"
                     
-                    if not current_file_version:
-                        updates_needed.append((file_name, new_version))
-                        if file_name == 'main.py':
-                            main_py_updated = True
-                    elif current_file_version[0] != new_version:
-                        updates_needed.append((file_name, new_version))
-                        if file_name == 'main.py':
-                            main_py_updated = True
-
-                if updates_needed:
-                    print(Fore.YELLOW + "\nUpdates available!" + Style.RESET_ALL)
-                    print(Fore.YELLOW + "\nIf this is your first installation and you see File and No version, please update!" + Style.RESET_ALL)
-                    print("\nFiles to update:")
-                    for file_name, new_version in updates_needed:
-                        cursor.execute("SELECT version FROM versions WHERE file_name = ?", (file_name,))
-                        current = cursor.fetchone()
-                        current_version = current[0] if current else "File and No Version"
-                        print(f"• {file_name}: {current_version} -> {new_version}")
-
-                    print("\nUpdate Notes:")
-                    for note in update_notes:
-                        print(f"• {note}")
-
-                    if main_py_updated:
-                        print(Fore.YELLOW + "\nNOTE: This update includes changes to main.py. Bot will restart after update." + Style.RESET_ALL)
-
-                    response = input("\nDo you want to update now? (y/n): ").lower()
-                    if response == 'y':
-                        needs_restart = False
+                if update:
+                    if os.path.exists("db") and os.path.isdir("db"):
+                        print(Fore.YELLOW + "Making backup of database..." + Style.RESET_ALL)
                         
-                        if os.path.exists("db") and os.path.isdir("db"):
-                            print(Fore.YELLOW + "Making backup of database..." + Style.RESET_ALL)
+                        if os.path.exists("db.bak") and os.path.isdir("db.bak"):
+                            shutil.rmtree("db.bak")
                             
-                            if os.path.exists("db.bak"):
-                                shutil.rmtree("db.bak")
-                                
-                            os.mkdir("db.bak")
-                            
-                            for file in os.listdir("db"):
-                                shutil.copy(os.path.join("db", file), os.path.join("db.bak", file))
-                                
-                            print(Fore.GREEN + "Backup completed!" + Style.RESET_ALL)
+                        shutil.copytree("db", "db.bak")
                         
-                        for file_name, new_version in updates_needed:
-                            if file_name.strip() != 'main.py':
-                                file_url = f"{source_url}/{file_name}"
-                                file_response = requests.get(file_url)
-                                
-                                if file_response.status_code == 200:
-                                    os.makedirs(os.path.dirname(file_name), exist_ok=True)
-                                    with open(file_name, 'wb') as f:
-                                        f.write(file_response.content)
-                                    
-                                    cursor.execute("""
-                                        INSERT OR REPLACE INTO versions (file_name, version, is_main)
-                                        VALUES (?, ?, ?)
-                                    """, (file_name, new_version, 0))
-
-                        if main_py_updated:
-                            main_file_url = f"{source_url}/main.py"
-                            main_response = requests.get(main_file_url)
+                        print(Fore.GREEN + "Backup completed." + Style.RESET_ALL)
+                    
+                    download_url = latest_release_data["assets"][0]["browser_download_url"]
+                    download_resp = requests.get(download_url)
+                    
+                    if download_resp.status_code == 200:
+                        with open("package.zip", "wb") as f:
+                            f.write(download_resp.content)
+                        
+                        shutil.unpack_archive("package.zip", "update", "zip")
+                        
+                        os.remove("package.zip")
+                        
+                        if os.path.exists("update/main.py"):
+                            shutil.copy("update/main.py", "main.py.new")
+                            os.rename("main.py", "main.py.bak")
+                            os.rename("main.py.new", "main.py")
                             
-                            if main_response.status_code == 200:
-                                with open('main.py.new', 'wb') as f:
-                                    f.write(main_response.content)
+                        for root, _, files in os.walk("update"):
+                            for file in files:
+                                rel_path = os.path.relpath(os.path.join(root, file), "update")
+                                dst_path = os.path.join(".", rel_path)
                                 
-                                cursor.execute("""
-                                    INSERT OR REPLACE INTO versions (file_name, version, is_main)
-                                    VALUES (?, ?, 1)
-                                """, ('main.py', documents['main.py']))
+                                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                                shutil.copy2(os.path.join(root, file), dst_path)
                                 
-                                needs_restart = True
-
-                        conn.commit()
-                        print(Fore.GREEN + "\nAll updates completed successfully!" + Style.RESET_ALL)
-
-                        if needs_restart:
-                            if os.path.exists('main.py.bak'):
-                                os.remove('main.py.bak')
-                            os.rename('main.py', 'main.py.bak')
-                            os.rename('main.py.new', 'main.py')
-                            print(Fore.YELLOW + "\nRestarting bot to apply main.py updates..." + Style.RESET_ALL)
-                            restart_bot()
+                        shutil.rmtree("update")
+                        
+                        print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
+                        
+                        with open("version", "w") as f:
+                            f.write(latest_tag)
+                        
+                        restart_bot()
                     else:
-                        print(Fore.YELLOW + "\nUpdate skipped. Running with existing files." + Style.RESET_ALL)
-
-            return False
-
-        except Exception as e:
-            print(Fore.RED + f"Error during version check: {e}" + Style.RESET_ALL)
-            return False
+                        print(Fore.RED + "Failed to download the update." + Style.RESET_ALL)
+                        return  
+        else:
+            print(Fore.RED + "Failed to fetch latest release info." + Style.RESET_ALL)
 
     class CustomBot(commands.Bot):
         async def on_error(self, event_name, *args, **kwargs):
@@ -505,25 +442,12 @@ if __name__ == "__main__":
         print(Fore.GREEN + "All tables checked." + Style.RESET_ALL)
 
     create_tables()
-    setup_version_table()  
 
     async def load_cogs():
-        await bot.load_extension("cogs.olddb")
-        await bot.load_extension("cogs.control")
-        await bot.load_extension("cogs.alliance")
-        await bot.load_extension("cogs.alliance_member_operations")
-        await bot.load_extension("cogs.bot_operations")
-        await bot.load_extension("cogs.logsystem")
-        await bot.load_extension("cogs.support_operations")
-        await bot.load_extension("cogs.gift_operations")
-        await bot.load_extension("cogs.changes")
-        await bot.load_extension("cogs.w")
-        await bot.load_extension("cogs.wel")
-        await bot.load_extension("cogs.other_features")
-        await bot.load_extension("cogs.bear_trap")
-        await bot.load_extension("cogs.id_channel")
-        await bot.load_extension("cogs.backup_operations")
-        await bot.load_extension("cogs.bear_trap_editor")
+        cogs = [ "olddb", "control", "alliance", "alliance_member_operations", "bot_operations", "logsystem", "support_operations", "gift_operations", "changes", "w", "wel", "other_features", "bear_trap", "id_channel", "backup_operations", "bear_trap_editor"]
+        
+        for cog in cogs:
+            await bot.load_extension(f"cogs.{cog}")
 
     @bot.event
     async def on_ready():
