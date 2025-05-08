@@ -352,8 +352,8 @@ if __name__ == "__main__":
                                 
                                 if file_response.status_code == 200:
                                     os.makedirs(os.path.dirname(file_name), exist_ok=True)
-                                    with open(file_name, 'w', encoding='utf-8', newline='') as f:
-                                        f.write(file_response.text)
+                                    with open(file_name, 'wb') as f:
+                                        f.write(file_response.content)
                                     
                                     cursor.execute("""
                                         INSERT OR REPLACE INTO versions (file_name, version, is_main)
@@ -365,9 +365,8 @@ if __name__ == "__main__":
                             main_response = requests.get(main_file_url)
                             
                             if main_response.status_code == 200:
-                                content = main_response.text.rstrip('\n')
-                                with open('main.py.new', 'w', encoding='utf-8', newline='') as f:
-                                    f.write(content)
+                                with open('main.py.new', 'wb') as f:
+                                    f.write(main_response.content)
                                 
                                 cursor.execute("""
                                     INSERT OR REPLACE INTO versions (file_name, version, is_main)
