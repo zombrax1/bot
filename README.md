@@ -27,9 +27,13 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 
 ## Installation Steps
 
-**IMPORTANT:** The current version of the bot will create a back up your database folder to db.bak automatically, so you no longer need to worry about it.
+> [!NOTE]
+> There are some known issues with onnxruntime + an outdated visual c++ library. to overcome this, install the latest version of visual c++.
 
-1.  **🛑 Stop the Bot:** Ensure your Discord bot `main.py` script is not currently running.
+> [!IMPORTANT]
+> The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore
+
+1.  **🛑 Stop the Bot:** Ensure your Discord bot's `main.py` script is not currently running.
 
 2.  **⬇️ Download Patch Files:**
     *   Download the updated Python files for the CAPTCHA patch. You will need these specific files:
@@ -42,7 +46,7 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 
 4.  **▶️ Restart the Bot:**
     *   Open a terminal or command prompt **in your bot's main directory**.
-    *   Run the bot's startup command as you normally would (e.g., `python main.py`).
+    *   Run the bot's startup command as you normally would (e.g., `python main.py`). *note: an update to v1.0.0 will show up, update to this to get the new patch*
     *   Observe the console output. This step might take a few minutes, depending on your internet connection.
     *   If the automatic installation completed successfully, the bot should continue starting up.
     *   **If the automatic installation fails:** Please contact the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
