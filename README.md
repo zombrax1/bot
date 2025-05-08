@@ -2,7 +2,7 @@
 
 This guide explains how to manually update your existing bot installation so that gift code redemption works again.
 
-`v2.0.0` is the last version that needs to be patched manually. If you run this version, you will be able to update via **(update process TBD)** in the future.
+`v1.0.0` is the last version that needs to be patched manually. If you run this version, you will be able to update via the autoupdate system in the future.
 
 This bot is a new, actively maintained version of the original bot created by Reloisback. You can find the original repository [here](https://github.com/Reloisback/Whiteout-Survival-Discord-Bot/blob/main/README.md).
 
@@ -34,16 +34,11 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 2.  **⬇️ Download Patch Files:**
     *   Download the updated Python files for the CAPTCHA patch. You will need these specific files:
         *   `main.py`
-        *   `cogs/gift_operations.py`
-        *   `cogs/gift_captchasolver.py`
-    *   [Click here to download Patch Files - link TBD]()
+    *   [Click here to download the patched main.py](https://github.com/whiteout-project/bot/blob/main/main.py)
 
 3.  **🔄 Replace/Add Files:**
     *   Go to your bot's main directory.
     *   Replace the existing `main.py` with the downloaded `main.py`.
-    *   Go into the `cogs` sub-directory.
-    *   Replace the existing `gift_operations.py` with the downloaded one.
-    *   Add the new `gift_captchasolver.py` file into the `cogs` directory, or replace it if it already exists.
 
 4.  **▶️ Restart the Bot:**
     *   Open a terminal or command prompt **in your bot's main directory**.
@@ -72,7 +67,7 @@ If you encounter issues with this patch, reach out to the [project admins](https
 
 ## 🛠️ Patch Notes 
 
-### Version 2.0.0 (Current)
+### Version v1.0.0 (Current)
 
 - 🔁 Replaced EasyOCR with ddddocr — Faster, lighter, smarter. Like trading a fax machine for a laser cannon.
 - 🧹 Auto-cleans itself now — main.py will politely (and mercilessly) uninstall EasyOCR and its baggage. Then installs ddddocr like a boss.
@@ -84,20 +79,3 @@ If you encounter issues with this patch, reach out to the [project admins](https
 - 📉 Trimmed log file bloat — Only keeps 1 backup now. Your hard drive can breathe a bit better.
 - 📊 Improved OCR Settings statistics page — More stats. More clarity. Slightly less shame.
 - ♻️ Fixed duplicate install checks on startup & updated main.py to work with our new repository. We pray that it works.
-
-### Version 1.0.5
-
-- ♻️ Improved robustness of the gift code channel monitoring:
-  - If 4 redemption attempts fail, a ⏳ emoji is added, and the system retries in the next cycle.
-
-- 🧹 Bug Fixes & Maintenance:
-  - Fixed an error when saving all OCR images (previously required turning off image saving to avoid crash).
-  - Reduced frequency of periodic gift code revalidation from every 5 minutes to **every 30 minutes** to reduce system load.
-  - Final status update in the result embed is now always shown after redemption completes.
-  - Switched `giftlog.txt` to use a proper logger with **log rotation** (3MB max, 3 backups).
-  - Gift Code Operations menu text was updated to cover all buttons.
-
-- 🧠 OCR and image processing improvements:
-  - Decoupled image saving from OCR outcome: captcha images are saved once up front and renamed/deleted later based on result.
-  - Captcha images from successful OCR are now saved as `<captcha>.png`.
-  - Failed OCR attempts are saved (if enabled) as `FAIL_<captcha>_<timestamp>.png`.
