@@ -7,16 +7,43 @@ import os
 
 print("Removing unneccesary files...")
 
-if os.path.exists("V1oldbot") and os.path.isdir("V1oldbot"):
-    shutil.rmtree("V1oldbot")
-    
-if os.path.exists("V2Old") and os.path.isdir("V2Old"):
-    shutil.rmtree("V2Old")
-    
-if os.path.exists("autoupdateinfo.txt"):
-    os.remove("autoupdateinfo.txt")
-    
-print("Unneccesary files removed.")
+v1_path = "V1oldbot"
+if os.path.exists(v1_path) and os.path.isdir(v1_path):
+    try:
+        shutil.rmtree(v1_path)
+        print(f"Removed directory: {v1_path}")
+    except PermissionError:
+        print(f"Warning: Access Denied. Could not remove legacy directory '{v1_path}'. Please check permissions or if files are in use, then remove manually if needed.")
+    except OSError as e:
+        print(f"Warning: Could not remove legacy directory '{v1_path}': {e}")
+else:
+    print(f"Directory '{v1_path}' not found. No cleanup needed.")
+
+v2_path = "V2Old"
+if os.path.exists(v2_path) and os.path.isdir(v2_path):
+    try:
+        shutil.rmtree(v2_path)
+        print(f"Removed directory: {v2_path}")
+    except PermissionError:
+        print(f"Warning: Access Denied. Could not remove legacy directory '{v2_path}'. Please check permissions or if files are in use, then remove manually if needed.")
+    except OSError as e:
+        print(f"Warning: Could not remove legacy directory '{v2_path}': {e}")
+else:
+    print(f"Directory '{v2_path}' not found. No cleanup needed.")
+
+txt_path = "autoupdateinfo.txt"
+if os.path.exists(txt_path) and os.path.isfile(txt_path): 
+    try:
+        os.remove(txt_path)
+        print(f"Removed file: {txt_path}")
+    except PermissionError:
+        print(f"Warning: Access Denied. Could not remove legacy file '{txt_path}'. Please check permissions or if the file is in use, then remove it manually if needed.")
+    except OSError as e:
+        print(f"Warning: Could not remove legacy file '{txt_path}': {e}")
+else:
+    print(f"File '{txt_path}' not found. No cleanup needed.")
+
+print("Cleanup attempt finished.")
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
