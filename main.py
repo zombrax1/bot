@@ -352,9 +352,8 @@ if __name__ == "__main__":
                                 
                                 if file_response.status_code == 200:
                                     os.makedirs(os.path.dirname(file_name), exist_ok=True)
-                                    content = file_response.text.rstrip('\n')
                                     with open(file_name, 'w', encoding='utf-8', newline='') as f:
-                                        f.write(content)
+                                        f.write(file_response.text)
                                     
                                     cursor.execute("""
                                         INSERT OR REPLACE INTO versions (file_name, version, is_main)
