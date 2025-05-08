@@ -35,23 +35,26 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 
 1.  **🛑 Stop the Bot:** Ensure your Discord bot's `main.py` script is not currently running.
 
-2.  **⬇️ Download Patch Files:**
+2.  **🗑️ Uninstall old OCR Packages:**
+    *   Run this command in your terminal: `pip uninstall -y easyocr torch torchvision torchaudio opencv-python`
+
+3.  **⬇️ Download Patch Files:**
     *   Download the updated Python files for the CAPTCHA patch. You will need these specific files:
         *   `main.py`
     *   [Click here to download the patched main.py](https://github.com/whiteout-project/bot/blob/main/main.py)
 
-3.  **🔄 Replace/Add Files:**
+4.  **🔄 Replace/Add Files:**
     *   Go to your bot's main directory.
     *   Replace the existing `main.py` with the downloaded `main.py`.
 
-4.  **▶️ Restart the Bot:**
+5.  **▶️ Restart the Bot:**
     *   Open a terminal or command prompt **in your bot's main directory**.
     *   Run the bot's startup command as you normally would (e.g., `python main.py`). *note: an update to v1.0.0 will show up, update to this to get the new patch*
     *   Observe the console output. This step might take a few minutes, depending on your internet connection.
     *   If the automatic installation completed successfully, the bot should continue starting up.
     *   **If the automatic installation fails:** Please contact the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
 
-5.  **✅ Verify:**
+6.  **✅ Verify:**
     *   Check the bot's console output for any errors during startup, especially related to `GiftOperations` or `GiftCaptchaSolver`. Look for messages indicating whether the solver initialized successfully.
     *   Once the bot is online, try using the `/settings` command (or equivalent) and navigate to the Gift Code Operations menu to ensure it loads correctly. Check the OCR status under the `CAPTCHA Settings`.
     *   Test redeeming some gift codes. It should be working, although it may take a bit longer than before.
