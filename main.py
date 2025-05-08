@@ -115,9 +115,17 @@ if __name__ == "__main__":
                         os.remove("package.zip")
                         
                         if os.path.exists("update/main.py"):
-                            shutil.copy("update/main.py", "main.py.new")
+                            os.rename("update/main.py", "main.py.new")
                             os.rename("main.py", "main.py.bak")
                             os.rename("main.py.new", "main.py")
+                            
+                        if os.path.exists("update/requirements.txt"):                                
+                            print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
+                            
+                            install_packages("update/requirements.txt")
+                            os.remove("update/requirements.txt")
+                            
+                            print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
                             
                         for root, _, files in os.walk("update"):
                             for file in files:
@@ -126,13 +134,6 @@ if __name__ == "__main__":
                                 
                                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                                 shutil.copy2(os.path.join(root, file), dst_path)
-                                
-                        if os.path.exists("update/requirements.txt"):                                
-                            print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
-                            
-                            install_packages("update/requirements.txt")
-                            
-                            print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
                                 
                         shutil.rmtree("update")
                         
