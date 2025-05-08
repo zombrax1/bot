@@ -20,7 +20,7 @@ print("Unneccesary files removed.")
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-init(autoreset=True) # Initialize colorama
+init(autoreset=True)
 
 try:
     import ssl
@@ -36,248 +36,31 @@ try:
         ssl._create_default_https_context = _create_ssl_context_with_certifi
         
         print(Fore.GREEN + "Applied SSL context patch using certifi for default HTTPS connections." + Style.RESET_ALL)
-    else:
-        # Assume if it's already patched, it's for a good reason, just log it.
+    else: # Assume if it's already patched, it's for a good reason, just log it.
         print(Fore.YELLOW + "SSL default HTTPS context seems to be already modified. Skipping certifi patch." + Style.RESET_ALL)
 except ImportError:
     print(Fore.RED + "Certifi library not found. SSL certificate verification might fail until it's installed." + Style.RESET_ALL)
 except Exception as e:
     print(Fore.RED + f"Error applying SSL context patch: {e}" + Style.RESET_ALL)
 
-def check_and_install_requirements():
-    required_packages = {
-        "discord.py": "discord.py",
-        "colorama": "colorama",
-        "requests": "requests",
-        "aiohttp": "aiohttp",
-        "python-dotenv": "python-dotenv",
-        "aiohttp-socks": "aiohttp-socks",
-        "pytz": "pytz",
-        "pyzipper": "pyzipper",
-        "certifi": "certifi",
-    }
-    
-    ocr_packages = {
-        "numpy": "numpy",
-        "Pillow": "Pillow",
-        "ddddocr": "ddddocr",
-    }
-
-    ddddocr_key_const = "ddddocr"
-    ddddocr_target_version_const = "1.5.6"
-    ddddocr_pip_spec_const = f"{ddddocr_key_const}=={ddddocr_target_version_const}"
-    ddddocr_forced_cmd_args_const = [sys.executable, "-m", "pip", "install", ddddocr_pip_spec_const, "--ignore-requires-python", "--force-reinstall", "--no-cache-dir"]
-    
-    installation_happened = False
-    packages_to_uninstall = ["easyocr", "torch", "torchvision", "torchaudio", "opencv-python"]
-
-    try:
-        import pkg_resources
-        
-        pkg_resources._initialize_master_working_set()
-        installed_packages_dict = {pkg.key: pkg for pkg in pkg_resources.working_set} 
-        installed_packages = set(installed_packages_dict.keys())
-
-        uninstall_cmds = []
-        
-        for pkg_key in packages_to_uninstall:
-            if pkg_key.lower() in installed_packages_dict:
-                uninstall_cmds.append(pkg_key)
-
-        if uninstall_cmds:
-            print(f"Found old OCR packages ({', '.join(uninstall_cmds)}). Attempting to uninstall...")
-            
-            full_uninstall_cmd = [sys.executable, "-m", "pip", "uninstall", "-y"] + uninstall_cmds
-            
-            try:
-                subprocess.check_call(full_uninstall_cmd, timeout=600)
-                
-                print(f"Successfully uninstalled: {', '.join(uninstall_cmds)}")
-                
-                pkg_resources._initialize_master_working_set()
-                
-                installed_packages_dict = {pkg.key: pkg for pkg in pkg_resources.working_set}
-                installed_packages = set(installed_packages_dict.keys())
-                installation_happened = True
-            except subprocess.TimeoutExpired:
-                print("Warning: Uninstallation of old packages timed out.")
-            except subprocess.CalledProcessError as e:
-                print(f"Warning: Error during uninstallation of old packages: {e}. Please check manually.")
-            except Exception as e:
-                print(f"Warning: Unexpected error during uninstallation: {e}")
-    except ImportError:
-        print("Warning: Cannot check for old packages to uninstall because pkg_resources is not available initially.")
-        
-        installed_packages = set()
-        installed_packages_dict = {}
-    except Exception as e:
-        print(f"Warning: Error during pre-uninstall check: {e}")
-
-    def install_package(package_name_for_log, command_args=None):
-        """Installs a package using pip. command_args is the list of args after 'pip'."""
-        nonlocal installation_happened
-        
-        full_pip_command = command_args
-
-        try:
-            print(f"Processing {package_name_for_log}...")
-            print(f"Running command: {' '.join(full_pip_command)}")
-            
-            subprocess.check_call(full_pip_command, timeout=1200)
-            
-            print(f"{package_name_for_log} processed successfully.")
-            
-            installation_happened = True
-            return True
-        except subprocess.TimeoutExpired:
-            print(f"Error: Processing of {package_name_for_log} timed out (20 minutes).")
-            return False
-        except subprocess.CalledProcessError as e:
-            print(f"Error processing {package_name_for_log}: {e}")
-            return False
-        except Exception as e:
-            print(f"Unexpected error processing {package_name_for_log}: {e}")
-            return False
-
-    try:
-        import pkg_resources
-        
-        installed_packages = {pkg.key for pkg in pkg_resources.working_set}
-    except ImportError:
-        print("pkg_resources not found, attempting to install setuptools...")
-        install_package("setuptools", command_args=[sys.executable, "-m", "pip", "install", "setuptools", "--no-cache-dir"])
-        
-        try:
-            import pkg_resources
-            
-            pkg_resources._initialize_master_working_set()
-            
-            installed_packages = {pkg.key for pkg in pkg_resources.working_set}
-        except ImportError:
-            print("FATAL: Could not import pkg_resources even after installing setuptools. Cannot check libraries.")
-            sys.exit(1)
-
-    packages_to_install = []
-
-    for package_key, pip_name in required_packages.items():
-        if package_key.lower() not in installed_packages:
-            packages_to_install.append(pip_name)
-
-    for check_name_ocr, install_name_ocr in ocr_packages.items():
-        if check_name_ocr.lower() == ddddocr_key_const:
-            needs_ddddocr_special_install = False
-            
-            if ddddocr_key_const not in installed_packages:
-                needs_ddddocr_special_install = True
-            else:
-                try:
-                    current_version = pkg_resources.get_distribution(ddddocr_key_const).version
-                    
-                    if current_version != ddddocr_target_version_const:
-                        needs_ddddocr_special_install = True
-                except Exception:
-                    needs_ddddocr_special_install = True
-            
-            if needs_ddddocr_special_install:
-                packages_to_install.append(ddddocr_pip_spec_const)
-                
-        elif check_name_ocr.lower() not in installed_packages:
-            packages_to_install.append(install_name_ocr)
-
-    if packages_to_install:
-        print("\nMissing or specific version libraries detected. Starting installation/update...")
-
-        for package_name_or_spec_to_install in packages_to_install:
-            log_display_name = package_name_or_spec_to_install
-            full_command_to_run_with_pip = [] 
-
-            if package_name_or_spec_to_install == ddddocr_pip_spec_const:
-                log_display_name = f"{ddddocr_pip_spec_const} (forced install)"
-                full_command_to_run_with_pip = ddddocr_forced_cmd_args_const
-            else:
-                full_command_to_run_with_pip = [sys.executable, "-m", "pip", "install", package_name_or_spec_to_install, "--no-cache-dir"]
-            
-            success = install_package(log_display_name, command_args=full_command_to_run_with_pip)
-            
-            if not success:
-                manual_cmd_str = " ".join(full_command_to_run_with_pip)
-                print(f"ERROR: Failed to process '{log_display_name}'. Please try manually: {manual_cmd_str}")
-                sys.exit(1)
-            
-        if installation_happened:
-            try:
-                print("Refreshing package list after installations...")
-                
-                pkg_resources._initialize_master_working_set()
-                installed_packages_dict = {pkg.key: pkg for pkg in pkg_resources.working_set}
-                installed_packages = set(installed_packages_dict.keys())
-                
-                print("Package list refreshed.")
-            except Exception as e:
-                print(f"Warning: Could not refresh package list after installations: {e}")
-
-        # Check to avoid cv2 compatibility issue with ddddocr
-        ddddocr_present = "ddddocr" in installed_packages
-        if ddddocr_present:
-            print("Verifying ddddocr dependencies (opencv)...")
-            
-            opencv_headless_key = "opencv-python-headless"
-            
-            try:
-                import_check_cmd = [sys.executable, "-c", "import cv2; print('cv2 imported ok')"]
-                result = subprocess.run(import_check_cmd, capture_output=True, text=True, check=False, timeout=30)
-
-                if result.returncode == 0 and "cv2 imported ok" in result.stdout:
-                    print("cv2 import check successful.")
-                else:
-                    raise ModuleNotFoundError(f"cv2 import check failed via subprocess. Stderr: {result.stderr}")
-
-            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, ModuleNotFoundError) as import_err:
-                print(f"cv2 import check failed ({type(import_err).__name__})! Attempting to reinstall {opencv_headless_key}...")
-                
-                uninstall_cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", opencv_headless_key]
-                
-                try:
-                    subprocess.check_call(uninstall_cmd, timeout=300)
-                except Exception:
-                    print("Warning: Failed to run uninstall command for opencv packages.")
-
-                install_cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", opencv_headless_key]
-                
-                try:
-                    subprocess.check_call(install_cmd, timeout=600)
-                    
-                    print(f"Reinstalled {opencv_headless_key} successfully.")
-                    
-                    installation_happened = True
-                except Exception as e:
-                    print(f"ERROR: Failed to reinstall {opencv_headless_key}: {e}. ddddocr might not work.")
-
-            except Exception as unexpected_err:
-                print(f"ERROR: Unexpected error during cv2 import verification: {unexpected_err}")
-                
-        if installation_happened:
-            print(Fore.GREEN + "\nLibrary installation/verification process finished!" + Style.RESET_ALL)
-            return True
-        else:
-            print("All required libraries seem to be installed.")
-            return False
-
 if __name__ == "__main__":
-    check_and_install_requirements()
-    
-    import discord
-    from discord.ext import commands
-    import sqlite3
     import requests
-    import asyncio
-
+    
     VERSION_URL = "https://raw.githubusercontent.com/whiteout-project/bot/refs/heads/main/auto_update"
 
     def restart_bot():
         print(Fore.YELLOW + "\nRestarting bot..." + Style.RESET_ALL)
         python = sys.executable
         os.execl(python, python, *sys.argv)
+        
+    def install_packages(requirements_txt_path: str) -> bool:
+        full_command= [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python"]
+        
+        try:
+            subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception as _:
+            return False
 
     async def check_and_update_files():
         latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
@@ -344,6 +127,13 @@ if __name__ == "__main__":
                                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                                 shutil.copy2(os.path.join(root, file), dst_path)
                                 
+                        if os.path.exists("update/requirements.txt"):                                
+                            print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
+                            
+                            install_packages("update/requirements.txt")
+                            
+                            print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
+                                
                         shutil.rmtree("update")
                         
                         print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
@@ -357,6 +147,11 @@ if __name__ == "__main__":
                         return  
         else:
             print(Fore.RED + "Failed to fetch latest release info." + Style.RESET_ALL)
+            
+    import discord
+    from discord.ext import commands
+    import sqlite3
+    import asyncio
 
     class CustomBot(commands.Bot):
         async def on_error(self, event_name, *args, **kwargs):
