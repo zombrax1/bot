@@ -80,7 +80,7 @@ If you encounter issues with this patch, reach out to the [project admins](https
 - 🔥 Removed dusty old GPU config junk — No one needed it, especially not our new friend ddddocr. It’s in a nice farm upstate with the other unused settings.
 - 🛡️ Bundled certifi in main.py — Fixes those annoying SSL issues on AWS and friends. Big thanks to @destrimna for reporting, rather than rage-quitting.
 - 🧩 Fixed "All Alliances" feature — It works now. Because @destrimna sent in the fix. MVP.
-- 📉 Trimmed log file bloat — Only keeps 1 backup now. Your hard drive can breathe a bit better.
+- 📉 Trimmed log file and legacy file bloat — Your hard drive can breathe a bit better.
 - 📊 Improved OCR Settings statistics page — More stats. More clarity. Slightly less shame.
 - ♻️ Fixed duplicate install checks on startup & updated main.py to work with our new repository and update method. We pray that it works.
 - ⬇️ Reset the version numbering to start from 1.0.0 for a clean slate. And better vibes. Mostly for the vibes.
