@@ -28,8 +28,12 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 ## 🚀 Installation Steps
 
 > ⚠️ **IMPORTANT ⚠️**
+> - **Are you installing for the first time?** Follow the instructions [for New Installations](https://github.com/whiteout-project/bot/tree/main?tab=readme-ov-file#-for-new-installations) instead.
 > - If you run your bot on Windows, there is a known issue with onnxruntime + an outdated Visual C++ library. To overcome this, install [the latest version of Visual C++](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) and then run `main.py` again.
+> - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
 > - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
+
+### For Existing Installations (Upgrading):
 
 1.  **🛑 Stop the Bot:** Ensure your Discord bot's `main.py` script is not currently running.
 
@@ -52,10 +56,20 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
     *   If the automatic installation completed successfully, the bot should continue starting up.
     *   **If the automatic installation fails:** Please contact the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
 
-6.  **✅ Verify:**
-    *   Check the bot's console output for any errors during startup, especially related to `GiftOperations` or `GiftCaptchaSolver`. Look for messages indicating whether the solver initialized successfully.
-    *   Once the bot is online, try using the `/settings` command (or equivalent) and navigate to the Gift Code Operations menu to ensure it loads correctly. Check the OCR status under the `CAPTCHA Settings`.
-    *   Test redeeming some gift codes. It should be working, although it may take a bit longer than before.
+### For New Installations:
+
+1.  **⬇️ Download the Complete Package:**
+    *   Download the [full release page](https://github.com/whiteout-project/bot/archive/refs/tags/v1.0.0.zip)
+    *   Extract the ZIP to a new directory where you want to run the bot
+
+2.  **▶️ Start the Bot:**
+    *   Open a terminal or command prompt **in your bot's main directory**.
+    *   Run `python main.py` to start the bot
+    *   If prompted for a Discord bot token, enter your bot token
+    *   The bot should initialize and connect to Discord
+
+3.  **🔧 Run Settings:**
+    *   Remember to run /settings for the bot in Discord to configure yourself as the admin.
 
 ---
 
