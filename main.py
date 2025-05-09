@@ -66,8 +66,6 @@ except Exception as e:
 
 if __name__ == "__main__":
     import requests
-    
-    VERSION_URL = "https://raw.githubusercontent.com/whiteout-project/bot/refs/heads/main/auto_update"
 
     def restart_bot():
         print(Fore.YELLOW + "\nRestarting bot..." + Style.RESET_ALL)
