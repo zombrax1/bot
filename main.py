@@ -16,8 +16,6 @@ if os.path.exists(v1_path) and os.path.isdir(v1_path):
         print(f"Warning: Access Denied. Could not remove legacy directory '{v1_path}'. Please check permissions or if files are in use, then remove manually if needed.")
     except OSError as e:
         print(f"Warning: Could not remove legacy directory '{v1_path}': {e}")
-else:
-    print(f"Directory '{v1_path}' not found. No cleanup needed.")
 
 v2_path = "V2Old"
 if os.path.exists(v2_path) and os.path.isdir(v2_path):
@@ -28,8 +26,6 @@ if os.path.exists(v2_path) and os.path.isdir(v2_path):
         print(f"Warning: Access Denied. Could not remove legacy directory '{v2_path}'. Please check permissions or if files are in use, then remove manually if needed.")
     except OSError as e:
         print(f"Warning: Could not remove legacy directory '{v2_path}': {e}")
-else:
-    print(f"Directory '{v2_path}' not found. No cleanup needed.")
 
 txt_path = "autoupdateinfo.txt"
 if os.path.exists(txt_path) and os.path.isfile(txt_path): 
@@ -40,8 +36,6 @@ if os.path.exists(txt_path) and os.path.isfile(txt_path):
         print(f"Warning: Access Denied. Could not remove legacy file '{txt_path}'. Please check permissions or if the file is in use, then remove it manually if needed.")
     except OSError as e:
         print(f"Warning: Could not remove legacy file '{txt_path}': {e}")
-else:
-    print(f"File '{txt_path}' not found. No cleanup needed.")
 
 print("Cleanup attempt finished.")
 
@@ -132,9 +126,13 @@ if __name__ == "__main__":
                         print(Fore.YELLOW + "Making backup of database..." + Style.RESET_ALL)
                         
                         if os.path.exists("db.bak") and os.path.isdir("db.bak"):
-                            shutil.rmtree("db.bak")
-                            
-                        shutil.copytree("db", "db.bak")
+                            try:
+                                shutil.rmtree("db.bak")
+                            except PermissionError:
+                                print(Fore.RED + "WARNING: db.bak folder could not be removed. A backup will not be created." + Style.RESET_ALL)
+                        
+                        if not os.path.exists("db.bak"):
+                            shutil.copytree("db", "db.bak")
                         
                         print(Fore.GREEN + "Backup completed." + Style.RESET_ALL)
                     
