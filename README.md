@@ -28,7 +28,7 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 ## 🚀 Installation Steps
 
 ### ⚠️ **IMPORTANT ⚠️**
- - **Are you installing for the first time?** Follow the instructions [for New Installations](https://github.com/whiteout-project/bot/tree/main?tab=readme-ov-file#-for-new-installations) instead.
+ - **Are you installing for the first time?** Follow the instructions [for New Installations](https://github.com/whiteout-project/bot?tab=readme-ov-file#for-new-installations) instead.
  - If you run your bot on Windows, there is a known issue with onnxruntime + an outdated Visual C++ library. To overcome this, install [the latest version of Visual C++](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) and then run `main.py` again.
  - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
  - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
