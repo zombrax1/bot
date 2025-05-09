@@ -165,8 +165,11 @@ if __name__ == "__main__":
                                 
                                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                                 shutil.copy2(os.path.join(root, file), dst_path)
-                                
-                        shutil.rmtree("update")
+                        
+                        try:        
+                            shutil.rmtree("update")
+                        except Exception as _:
+                            print(Fore.RED + "WARNING: update folder could not be removed. Please remove it manually." + Style.RESET_ALL)
                         
                         print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
                         
