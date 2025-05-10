@@ -183,10 +183,13 @@ if __name__ == "__main__":
         else:
             print(Fore.RED + "Failed to fetch latest release info." + Style.RESET_ALL)
             
+    import asyncio
+            
+    asyncio.run(check_and_update_files())
+            
     import discord
     from discord.ext import commands
     import sqlite3
-    import asyncio
 
     class CustomBot(commands.Bot):
         async def on_error(self, event_name, *args, **kwargs):
@@ -319,8 +322,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error syncing commands: {e}")
 
-    async def main():        
-        await check_and_update_files()
+    async def main():
         await load_cogs()
         
         await bot.start(bot_token)
