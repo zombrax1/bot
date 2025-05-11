@@ -81,7 +81,7 @@ if __name__ == "__main__":
             os.execl(python, python, script_path, *sys.argv[1:])
         
     def install_packages(requirements_txt_path: str) -> bool:
-        full_command= [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python"]
+        full_command = [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python", "--force-reinstall"]
         
         try:
             subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -150,7 +150,7 @@ if __name__ == "__main__":
                             os.rename("main.py", "main.py.bak")
                             os.rename("main.py.new", "main.py")
                             
-                        if os.path.exists("update/requirements.txt"):                                
+                        if os.path.exists("update/requirements.txt"):                      
                             print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
                             
                             install_packages("update/requirements.txt")
