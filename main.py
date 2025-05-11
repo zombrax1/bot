@@ -84,7 +84,7 @@ if __name__ == "__main__":
         full_command = [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python", "--force-reinstall"]
         
         try:
-            subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(full_command, timeout=1200)
             return True
         except Exception as _:
             return False
