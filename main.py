@@ -81,10 +81,10 @@ if __name__ == "__main__":
             os.execl(python, python, script_path, *sys.argv[1:])
         
     def install_packages(requirements_txt_path: str) -> bool:
-        full_command= [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python"]
+        full_command = [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python", "--force-reinstall"]
         
         try:
-            subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(full_command, timeout=1200)
             return True
         except Exception as _:
             return False
@@ -150,7 +150,7 @@ if __name__ == "__main__":
                             os.rename("main.py", "main.py.bak")
                             os.rename("main.py.new", "main.py")
                             
-                        if os.path.exists("update/requirements.txt"):                                
+                        if os.path.exists("update/requirements.txt"):                      
                             print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
                             
                             install_packages("update/requirements.txt")
@@ -165,8 +165,11 @@ if __name__ == "__main__":
                                 
                                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                                 shutil.copy2(os.path.join(root, file), dst_path)
-                                
-                        shutil.rmtree("update")
+                        
+                        try:        
+                            shutil.rmtree("update")
+                        except Exception as _:
+                            print(Fore.RED + "WARNING: update folder could not be removed. Please remove it manually." + Style.RESET_ALL)
                         
                         print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
                         
@@ -180,10 +183,13 @@ if __name__ == "__main__":
         else:
             print(Fore.RED + "Failed to fetch latest release info." + Style.RESET_ALL)
             
+    import asyncio
+            
+    asyncio.run(check_and_update_files())
+            
     import discord
     from discord.ext import commands
     import sqlite3
-    import asyncio
 
     class CustomBot(commands.Bot):
         async def on_error(self, event_name, *args, **kwargs):
@@ -316,8 +322,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error syncing commands: {e}")
 
-    async def main():        
-        await check_and_update_files()
+    async def main():
         await load_cogs()
         
         await bot.start(bot_token)
