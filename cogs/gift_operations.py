@@ -181,6 +181,8 @@ class GiftOperations(commands.Cog):
                 if not self.captcha_solver.is_initialized:
                     self.logger.error("GiftOps __init__: DdddOcr solver FAILED to initialize with defaults.")
                     self.captcha_solver = None
+                else: # Ensure success is logged here for the CI
+                    self.logger.info("GiftOps __init__: DdddOcr solver initialized successfully.")
 
         except ImportError as lib_err:
             self.logger.exception(f"GiftOps __init__: ERROR - Missing required library for OCR (likely ddddocr): {lib_err}. Captcha solving disabled.")
