@@ -24,13 +24,26 @@ jobs:
         python-version: ["3.12.x", "3.13.x"]
 
     steps:
-    - name: checkout repo
+    - name: Checkout repo
       uses: actions/checkout@v4
     
-    - name: setup python environments
+    - name: Setup python environments
       uses: actions/setup-python@v3
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: run script
+    - name: Install script dependencies
       run: python3 main.py --autoupdate
+
+    - name: Write bot token
+      run: echo "${{ secrets.CI_BOT_TOKEN }}" > bot_token.txt
+    
+    - name: Run script and wait for activation message
+      run: |
+        python3 main.py --autoupdate | while read -r line; do
+          echo "$line"
+          if [[ "$line" == *"Activation messages sent to admin user"* ]]; then
+            echo "Activation message detected, stopping script."
+            break
+          fi
+        done
