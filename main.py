@@ -1,8 +1,21 @@
-from colorama import Fore, Style, init
 import subprocess
+import sys
+
+try:
+    from colorama import Fore, Style, init
+    import requests
+except ImportError:
+    print("Installing required dependencies...")
+    
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama", "requests"], timeout=1200)
+        print("Dependencies installed successfully. Please restart the script.")
+        sys.exit()
+    except Exception as _:
+        print("Failed to install required dependencies. Please install them with \"pip install colorama requests\"")
+
 import warnings
 import shutil
-import sys
 import os
 
 print("Removing unneccesary files...")
@@ -81,13 +94,24 @@ if __name__ == "__main__":
             os.execl(python, python, script_path, *sys.argv[1:])
         
     def install_packages(requirements_txt_path: str) -> bool:
-        full_command = [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python", "--force-reinstall"]
+        with open(requirements_txt_path, "r") as f: 
+            lines = [line.strip() for line in f]
         
-        try:
-            subprocess.check_call(full_command, timeout=1200)
-            return True
-        except Exception as _:
-            return False
+        success = []
+            
+        for dependency in lines:
+            full_command = [sys.executable, "-m", "pip", "install", dependency, "--no-cache-dir", "--force-reinstall"]
+            
+            if dependency.startswith("ddddocr") and (sys.version_info.major == 3 and sys.version_info.minor == 13):
+                full_command = full_command + ["--ignore-requires-python"]
+        
+            try:
+                subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                success.append(0)
+            except Exception as _:
+                success.append(1)
+                
+        return sum(success) == 0
 
     async def check_and_update_files():
         latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
@@ -153,10 +177,14 @@ if __name__ == "__main__":
                         if os.path.exists("update/requirements.txt"):                      
                             print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
                             
-                            install_packages("update/requirements.txt")
+                            success = install_packages("update/requirements.txt")
                             os.remove("update/requirements.txt")
                             
-                            print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
+                            if success:
+                                print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
+                            else:
+                                print(Fore.RED + "Failed to install requirements." + Style.RESET_ALL)
+                                return
                             
                         for root, _, files in os.walk("update"):
                             for file in files:
