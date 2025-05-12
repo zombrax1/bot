@@ -106,7 +106,7 @@ if __name__ == "__main__":
                 full_command = full_command + ["--ignore-requires-python"]
         
             try:
-                subprocess.check_call(full_command, timeout=1200)
+                subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 success.append(0)
             except Exception as _:
                 success.append(1)
@@ -177,10 +177,14 @@ if __name__ == "__main__":
                         if os.path.exists("update/requirements.txt"):                      
                             print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
                             
-                            install_packages("update/requirements.txt")
+                            success = install_packages("update/requirements.txt")
                             os.remove("update/requirements.txt")
                             
-                            print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
+                            if success:
+                                print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
+                            else:
+                                print(Fore.RED + "Failed to install requirements." + Style.RESET_ALL)
+                                return
                             
                         for root, _, files in os.walk("update"):
                             for file in files:
