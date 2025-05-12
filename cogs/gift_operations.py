@@ -3332,8 +3332,23 @@ class OCRSettingsView(discord.ui.View):
         test_fid = self.cog.get_test_fid()
 
         try:
-            logger.info(f"[Test Button] Fetching captcha for test FID {test_fid}...")
-            captcha_image_base64, error = await self.cog.fetch_captcha(test_fid)
+            logger.info(f"[Test Button] First logging in with test FID {test_fid}...")
+            session, response_stove_info = self.cog.get_stove_info_wos(player_id=test_fid)
+            
+            try:
+                player_info_json = response_stove_info.json()
+                if player_info_json.get("msg") != "success":
+                    logger.error(f"[Test Button] Login failed for test FID {test_fid}: {player_info_json.get('msg')}")
+                    await interaction.followup.send(f"❌ Login failed with test FID {test_fid}. Please check if the FID is valid.", ephemeral=True)
+                    return
+                logger.info(f"[Test Button] Successfully logged in with test FID {test_fid}")
+            except Exception as json_err:
+                logger.error(f"[Test Button] Error parsing login response: {json_err}")
+                await interaction.followup.send("❌ Error processing login response.", ephemeral=True)
+                return
+            
+            logger.info(f"[Test Button] Fetching captcha for test FID {test_fid} using established session...")
+            captcha_image_base64, error = await self.cog.fetch_captcha(test_fid, session=session)
             logger.info(f"[Test Button] Captcha fetch result: Error='{error}', HasImage={captcha_image_base64 is not None}")
 
             if error:
