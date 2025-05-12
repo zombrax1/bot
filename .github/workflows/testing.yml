@@ -48,3 +48,10 @@ jobs:
             break
           fi
         done
+
+    - name: Check for DDDDOcr solver initialization
+      run: |
+        if ! grep -q "DdddOcr solver initialized successfully" logs/gift_ops.txt; then
+          echo "Required message not found in logs/gift_ops.txt. Failing the job."
+          exit 1
+        fi
