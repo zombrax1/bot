@@ -113,6 +113,18 @@ if __name__ == "__main__":
                 
         return sum(success) == 0
 
+    def safe_remove_file(file_path):
+            """Safely remove a file if it exists."""
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                    return True
+                except PermissionError:
+                    print(Fore.YELLOW + f"Warning: Access Denied. Could not remove '{file_path}'. Check permissions or if file is in use." + Style.RESET_ALL)
+                except OSError as e:
+                    print(Fore.YELLOW + f"Warning: Could not remove '{file_path}': {e}" + Style.RESET_ALL)
+            return False
+
     async def check_and_update_files():
         latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
         
@@ -147,38 +159,73 @@ if __name__ == "__main__":
                     if os.path.exists("db") and os.path.isdir("db"):
                         print(Fore.YELLOW + "Making backup of database..." + Style.RESET_ALL)
                         
-                        if os.path.exists("db.bak") and os.path.isdir("db.bak"):
+                        db_bak_path = "db.bak"
+                        if os.path.exists(db_bak_path) and os.path.isdir(db_bak_path):
                             try:
-                                shutil.rmtree("db.bak")
-                            except PermissionError:
-                                print(Fore.RED + "WARNING: db.bak folder could not be removed. A backup will not be created." + Style.RESET_ALL)
-                        
-                        if not os.path.exists("db.bak"):
-                            shutil.copytree("db", "db.bak")
-                        
-                        print(Fore.GREEN + "Backup completed." + Style.RESET_ALL)
-                    
+                                shutil.rmtree(db_bak_path)
+                            except (PermissionError, OSError) as e: # Create a timestamped backup to avoid upgrading without first having a backup
+                                db_bak_path = f"db.bak_{int(datetime.now().timestamp())}"
+                                print(Fore.YELLOW + f"WARNING: Couldn't remove db.bak folder: {e}. Making backup with timestamp instead." + Style.RESET_ALL)
+
+                        try:
+                            shutil.copytree("db", db_bak_path)
+                            print(Fore.GREEN + f"Backup completed: db → {db_bak_path}" + Style.RESET_ALL)
+                        except Exception as e:
+                            print(Fore.RED + f"WARNING: Failed to create database backup: {e}" + Style.RESET_ALL)
+                                            
                     download_url = latest_release_data["assets"][0]["browser_download_url"]
+                    safe_remove_file("package.zip")
                     download_resp = requests.get(download_url)
                     
                     if download_resp.status_code == 200:
                         with open("package.zip", "wb") as f:
                             f.write(download_resp.content)
                         
-                        shutil.unpack_archive("package.zip", "update", "zip")
-                        
-                        os.remove("package.zip")
+                        if os.path.exists("update") and os.path.isdir("update"):
+                            try:
+                                shutil.rmtree("update")
+                            except (PermissionError, OSError) as e:
+                                print(Fore.RED + f"WARNING: Could not remove previous update directory: {e}" + Style.RESET_ALL)
+                                return
+                            
+                        try:
+                            shutil.unpack_archive("package.zip", "update", "zip")
+                        except Exception as e:
+                            print(Fore.RED + f"ERROR: Failed to extract update package: {e}" + Style.RESET_ALL)
+                            return
+                            
+                        safe_remove_file("package.zip")
                         
                         if os.path.exists("update/main.py"):
-                            os.rename("update/main.py", "main.py.new")
-                            os.rename("main.py", "main.py.bak")
-                            os.rename("main.py.new", "main.py")
+                            try:
+                                if os.path.exists("main.py.bak"):
+                                    os.remove("main.py.bak")
+                            except:
+                                pass
+                                
+                            try:
+                                if os.path.exists("main.py"):
+                                    os.rename("main.py", "main.py.bak")
+                            except Exception as e:
+                                print(Fore.YELLOW + f"Could not backup main.py: {e}" + Style.RESET_ALL)
+                                try: # If backup fails, just remove the current file
+                                    if os.path.exists("main.py"):
+                                        os.remove("main.py")
+                                        print(Fore.YELLOW + "Removed current main.py" + Style.RESET_ALL)
+                                except:
+                                    print(Fore.RED + "Warning: Could not backup or remove current main.py" + Style.RESET_ALL)
+                            
+                            try:
+                                shutil.copy2("update/main.py", "main.py")
+                            except Exception as e:
+                                print(Fore.RED + f"ERROR: Could not install new main.py: {e}" + Style.RESET_ALL)
+                                return
                             
                         if os.path.exists("update/requirements.txt"):                      
                             print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
                             
                             success = install_packages("update/requirements.txt")
-                            os.remove("update/requirements.txt")
+                            safe_remove_file("update/requirements.txt")
                             
                             if success:
                                 print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
@@ -192,26 +239,38 @@ if __name__ == "__main__":
                                 dst_path = os.path.join(".", rel_path)
                                 
                                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                                shutil.copy2(os.path.join(root, file), dst_path)
+
+                                if os.path.exists(dst_path):
+                                    backup_path = f"{dst_path}.bak"
+                                    safe_remove_file(backup_path)
+                                    try:
+                                        os.rename(dst_path, backup_path)
+                                    except Exception as e: # Continue anyway to try to update the file
+                                        print(Fore.YELLOW + f"Could not create backup of {dst_path}: {e}" + Style.RESET_ALL)
+                                        
+                                try:
+                                    shutil.copy2(os.path.join(root, file), dst_path)
+                                except Exception as e:
+                                    print(Fore.RED + f"Failed to copy {file} to {dst_path}: {e}" + Style.RESET_ALL)
                         
-                        try:        
+                        try:
                             shutil.rmtree("update")
-                        except Exception as _:
-                            print(Fore.RED + "WARNING: update folder could not be removed. Please remove it manually." + Style.RESET_ALL)
-                        
-                        print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
+                        except Exception as e:
+                            print(Fore.RED + f"WARNING: update folder could not be removed: {e}. You may want to remove it manually." + Style.RESET_ALL)
                         
                         with open("version", "w") as f:
                             f.write(latest_tag)
                         
+                        print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
                         restart_bot()
                     else:
-                        print(Fore.RED + "Failed to download the update." + Style.RESET_ALL)
+                        print(Fore.RED + "Failed to download the update. HTTP status: {download_resp.status_code}" + Style.RESET_ALL)
                         return  
         else:
-            print(Fore.RED + "Failed to fetch latest release info." + Style.RESET_ALL)
-            
+            print(Fore.RED + f"Failed to fetch latest release info. HTTP status: {latest_release_resp.status_code}" + Style.RESET_ALL)
+    
     import asyncio
+    from datetime import datetime
             
     asyncio.run(check_and_update_files())
             
