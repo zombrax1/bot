@@ -44,7 +44,8 @@ jobs:
         python3 main.py --autoupdate | while read -r line; do
           echo "$line"
           if [[ "$line" == *"Logged in as CI Bot#9154"* ]]; then
-            echo "Bot is logged in, ending test..."
+            echo "Bot is logged in, waiting 15 sec before ending test..."
+            sleep 15
             break
           fi
         done
