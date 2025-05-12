@@ -1,8 +1,21 @@
-from colorama import Fore, Style, init
 import subprocess
+import sys
+
+try:
+    from colorama import Fore, Style, init
+    import requests
+except ImportError:
+    print("Installing required dependencies...")
+    
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama", "requests"], timeout=1200)
+        print("Dependencies installed successfully. Please restart the script.")
+        sys.exit()
+    except Exception as _:
+        print("Failed to install required dependencies. Please install them with \"pip install colorama requests\"")
+
 import warnings
 import shutil
-import sys
 import os
 
 print("Removing unneccesary files...")
