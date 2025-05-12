@@ -1,0 +1,32 @@
+name: Python application
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  release:
+    types: [ "published" ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.12.x", "3.13.x"]
+
+    steps:
+    - name: checkout repo
+    - uses: actions/checkout@v4
+    
+    - name: setup python environments
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: run script
+      run: python3 main.py --autoupdate
