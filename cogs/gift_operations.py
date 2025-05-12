@@ -190,6 +190,25 @@ class GiftOperations(commands.Cog):
             self.logger.exception(f"Traceback: {traceback.format_exc()}")
             self.captcha_solver = None
 
+        # Test FID Settings Table
+        try:
+            self.settings_cursor.execute("""
+                CREATE TABLE IF NOT EXISTS test_fid_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    test_fid TEXT NOT NULL
+                )
+            """)
+            
+            self.settings_cursor.execute("SELECT test_fid FROM test_fid_settings ORDER BY id DESC LIMIT 1")
+            result = self.settings_cursor.fetchone()
+            
+            if not result: # Insert the default test FID if no entry exists
+                self.settings_cursor.execute("INSERT INTO test_fid_settings (test_fid) VALUES (?)", ("244886619",))
+                self.settings_conn.commit()
+                self.logger.info("Initialized default test FID (244886619) in database")
+        except Exception as e:
+            self.logger.exception(f"Error setting up test FID table: {e}")
+
     @commands.Cog.listener()
     async def on_ready(self):
         """
@@ -389,12 +408,6 @@ class GiftOperations(commands.Cog):
                 # Don't send to API until validated
                 self.logger.info(f"GiftOps: [on_message] Code '{giftcode}' added as pending - will send to API after validation.")
 
-                # Attempt to add via API as well
-                try:
-                    asyncio.create_task(self.api.add_giftcode(giftcode))
-                except Exception as api_add_err:
-                    self.logger.exception(f"GiftOps: [on_message] Error calling api.add_giftcode for '{giftcode}': {api_add_err}")
-
                 self.cursor.execute("SELECT alliance_id FROM giftcodecontrol WHERE status = 1")
                 auto_alliances = self.cursor.fetchall()
                 if auto_alliances:
@@ -448,6 +461,90 @@ class GiftOperations(commands.Cog):
             except Exception as log_e:
                 self.logger.exception(f"GiftOps: CRITICAL - Failed to write on_message handler error log: {log_e}")
 
+    async def verify_test_fid(self, fid):
+        """
+        Verify that a FID is valid by attempting to login to the account.
+        
+        Args:
+            fid (str): The FID to verify
+            
+        Returns:
+            tuple: (is_valid, message) where is_valid is a boolean and message is a string
+        """
+        try:
+            self.logger.info(f"Verifying test FID: {fid}")
+            
+            session, response_stove_info = self.get_stove_info_wos(player_id=fid)
+            
+            try:
+                player_info_json = response_stove_info.json()
+            except json.JSONDecodeError:
+                self.logger.error(f"Invalid JSON response when verifying FID {fid}")
+                return False, "Invalid response from server"
+            
+            login_successful = player_info_json.get("msg") == "success"
+            
+            if login_successful:
+                try:
+                    nickname = player_info_json.get("data", {}).get("nickname", "Unknown")
+                    furnace_lv = player_info_json.get("data", {}).get("stove_lv", "Unknown")
+                    self.logger.info(f"Test FID {fid} is valid. Nickname: {nickname}, Level: {furnace_lv}")
+                    return True, "Valid account"
+                except Exception as e:
+                    self.logger.exception(f"Error parsing player info for FID {fid}: {e}")
+                    return True, "Valid account (but error getting details)"
+            else:
+                error_msg = player_info_json.get("msg", "Unknown error")
+                self.logger.info(f"Test FID {fid} is invalid. Error: {error_msg}")
+                return False, f"Login failed: {error_msg}"
+        
+        except Exception as e:
+            self.logger.exception(f"Error verifying test FID {fid}: {e}")
+            return False, f"Verification error: {str(e)}"
+
+    async def update_test_fid(self, new_fid):
+        """
+        Update the test FID in the database.
+        
+        Args:
+            new_fid (str): The new test FID
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        try:
+            self.logger.info(f"Updating test FID to: {new_fid}")
+            
+            self.settings_cursor.execute("""
+                INSERT INTO test_fid_settings (test_fid) VALUES (?)
+            """, (new_fid,))
+            self.settings_conn.commit()
+            
+            self.logger.info(f"Test FID updated successfully to {new_fid}")
+            return True
+        
+        except sqlite3.Error as db_err:
+            self.logger.exception(f"Database error updating test FID: {db_err}")
+            return False
+        except Exception as e:
+            self.logger.exception(f"Unexpected error updating test FID: {e}")
+            return False
+
+    def get_test_fid(self):
+        """
+        Get the current test FID from the database.
+        
+        Returns:
+            str: The current test FID, or the default "244886619" if not found
+        """
+        try:
+            self.settings_cursor.execute("SELECT test_fid FROM test_fid_settings ORDER BY id DESC LIMIT 1")
+            result = self.settings_cursor.fetchone()
+            return result[0] if result else "244886619"
+        except Exception as e:
+            self.logger.exception(f"Error getting test FID: {e}")
+            return "244886619"
+
     def encode_data(self, data):
         secret = self.wos_encrypt_key
         sorted_keys = sorted(data.keys())
@@ -493,7 +590,8 @@ class GiftOperations(commands.Cog):
 
         try:
             # Cache Check
-            if player_id != "244886619":
+            test_fid = self.get_test_fid()
+            if player_id != test_fid:
                 self.cursor.execute("SELECT status FROM user_giftcodes WHERE fid = ? AND giftcode = ?", (player_id, giftcode))
                 existing_record = self.cursor.fetchone()
                 if existing_record:
@@ -636,7 +734,7 @@ class GiftOperations(commands.Cog):
                     status = "UNKNOWN_API_RESPONSE"
                     self.giftlog.info(f"Unknown API response for {player_id}: msg='{msg}', err_code={err_code}\n")
 
-                if player_id != "244886619" and status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+                if player_id != self.get_test_fid() and status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
                     try:
                         self.cursor.execute("""
                             INSERT OR REPLACE INTO user_giftcodes (fid, giftcode, status)
@@ -988,6 +1086,7 @@ class GiftOperations(commands.Cog):
                     ocr_settings = (1, 0)
 
                 enabled, save_images_setting = ocr_settings
+                current_test_fid = self.get_test_fid()
 
                 ddddocr_available = False
                 solver_status_msg = "N/A"
@@ -1022,6 +1121,7 @@ class GiftOperations(commands.Cog):
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🤖 **OCR Enabled:** {'✅ Yes' if enabled == 1 else '❌ No'}\n"
                         f"💾 **Save CAPTCHA Images:** {save_images_display}\n"
+                        f"🆔 **Test FID:** `{current_test_fid}`\n"
                         f"📦 **ddddocr Library:** {'✅ Found' if ddddocr_available else '❌ Missing'}\n"
                         f"⚙️ **Solver Status:** `{solver_status_msg}`\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1034,7 +1134,11 @@ class GiftOperations(commands.Cog):
                         name="⚠️ Missing Library",
                         value=(
                             "The `ddddocr` library is required for CAPTCHA solving.\n"
-                            "The bot owner needs to install it (`pip install ddddocr`)."
+                            "It did not initialize. The bot owner needs to fix this."
+                            "Try the following sequence of commands on the bot command line:"
+                            "pip uninstall ddddocr opencv-python opencv-python-headless onnxruntime numpy -y"
+                            "pip install numpy Pillow opencv-python-headless onnxruntime --no-cache-dir --force-reinstall"
+                            "pip install ddddocr==1.5.6 --no-cache-dir --force-reinstall --ignore-requires-python"
                         ), inline=False
                     )
 
@@ -1192,13 +1296,15 @@ class GiftOperations(commands.Cog):
                     continue
 
                 self.logger.info(f"[validate_gift_codes] Validating code: {giftcode} (current DB status: {current_db_status})")
-                status = await self.claim_giftcode_rewards_wos("244886619", giftcode)
+                test_fid = self.get_test_fid()
+                status = await self.claim_giftcode_rewards_wos(test_fid, giftcode)
 
                 if status in ["TIME_ERROR", "CDK_NOT_FOUND", "USAGE_LIMIT"]:
                     self.logger.info(f"[validate_gift_codes] Code {giftcode} found to be invalid with status: {status}. Updating DB.")
                     
                     self.cursor.execute("UPDATE gift_codes SET validation_status = 'invalid' WHERE giftcode = ?", (giftcode,))
-                    self.cursor.execute("DELETE FROM user_giftcodes WHERE giftcode = ? AND fid = ?", (giftcode, "244886619"))
+                    test_fid = self.get_test_fid()
+                    self.cursor.execute("DELETE FROM user_giftcodes WHERE giftcode = ? AND fid = ?", (giftcode, test_fid))
                     self.conn.commit()
                     
                     if hasattr(self, 'api') and self.api:
@@ -1247,7 +1353,8 @@ class GiftOperations(commands.Cog):
             self.logger.exception(f"Error in validate_gift_codes: {str(e)}")
 
     async def handle_success(self, message, giftcode):
-        status = await self.claim_giftcode_rewards_wos("244886619", giftcode)
+        test_fid = self.get_test_fid()
+        status = await self.claim_giftcode_rewards_wos(test_fid, giftcode)
         
         if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
             self.cursor.execute("SELECT 1 FROM gift_codes WHERE giftcode = ?", (giftcode,))
@@ -1271,7 +1378,8 @@ class GiftOperations(commands.Cog):
             await message.reply("Usage limit has been reached for this code.", mention_author=False)
 
     async def handle_already_received(self, message, giftcode):
-        status = await self.claim_giftcode_rewards_wos("244886619", giftcode)
+        test_fid = self.get_test_fid()
+        status = await self.claim_giftcode_rewards_wos(test_fid, giftcode)
         
         if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
             self.cursor.execute("SELECT 1 FROM gift_codes WHERE giftcode = ?", (giftcode,))
@@ -2202,7 +2310,8 @@ class GiftOperations(commands.Cog):
                 final_invalid_reason_for_embed = "Code previously marked as invalid"
             else:
                 # If not marked 'invalid' in master table, check with test FID if status is 'pending' or for other cached issues
-                self.cursor.execute("SELECT status FROM user_giftcodes WHERE fid = ? AND giftcode = ?", ("244886619", giftcode))
+                test_fid = self.get_test_fid()
+                self.cursor.execute("SELECT status FROM user_giftcodes WHERE fid = ? AND giftcode = ?", (test_fid, giftcode))
                 validation_fid_status_row = self.cursor.fetchone()
 
                 if validation_fid_status_row:
@@ -2642,6 +2751,81 @@ class DeleteGiftCodeModal(discord.ui.Modal, title="Delete Gift Code"):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+class TestFIDModal(discord.ui.Modal, title="Change Test FID"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        
+        try:
+            self.cog.settings_cursor.execute("SELECT test_fid FROM test_fid_settings ORDER BY id DESC LIMIT 1")
+            result = self.cog.settings_cursor.fetchone()
+            current_fid = result[0] if result else "244886619"
+        except Exception:
+            current_fid = "244886619"
+        
+        self.test_fid = discord.ui.TextInput(
+            label="Enter New Player ID (FID)",
+            placeholder="Example: 244886619",
+            default=current_fid,
+            required=True,
+            min_length=1,
+            max_length=20
+        )
+        self.add_item(self.test_fid)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            # Defer the response since we'll make an API call to validate
+            await interaction.response.defer(ephemeral=True)
+            
+            new_fid = self.test_fid.value.strip()
+            
+            if not new_fid.isdigit():
+                await interaction.followup.send("❌ Invalid FID format. Please enter a numeric FID.", ephemeral=True)
+                return
+            
+            is_valid, message = await self.cog.verify_test_fid(new_fid)
+            
+            if is_valid:
+                success = await self.cog.update_test_fid(new_fid)
+                
+                if success:
+                    embed = discord.Embed(
+                        title="✅ Test FID Updated",
+                        description=(
+                            f"**Test FID Configuration**\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🆔 **FID:** `{new_fid}`\n"
+                            f"✅ **Status:** Validated\n"
+                            f"📝 **Action:** Updated in database\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        ),
+                        color=discord.Color.green()
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                    
+                    await self.cog.show_ocr_settings(interaction)
+                else:
+                    await interaction.followup.send("❌ Failed to update test FID in database. Check logs for details.", ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="❌ Invalid Test FID",
+                    description=(
+                        f"**Test FID Validation**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🆔 **FID:** `{new_fid}`\n"
+                        f"❌ **Status:** Invalid FID\n"
+                        f"📝 **Reason:** {message}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ),
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                
+        except Exception as e:
+            self.cog.logger.exception(f"Error updating test FID: {e}")
+            await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
 class GiftView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
@@ -3070,6 +3254,15 @@ class OCRSettingsView(discord.ui.View):
         self.test_ocr_button_item.callback = self.test_ocr_button
         self.add_item(self.test_ocr_button_item)
 
+        # Add the Change Test FID Button
+        self.change_test_fid_button_item = discord.ui.Button(
+            label="Change Test FID", style=discord.ButtonStyle.primary, emoji="🔄",
+            custom_id="change_test_fid", row=0,
+            disabled=self.disable_controls
+        )
+        self.change_test_fid_button_item.callback = self.change_test_fid_button
+        self.add_item(self.change_test_fid_button_item)
+
         # Row 1: Back Button
         self.back_button_item = discord.ui.Button(
             label="Back", style=discord.ButtonStyle.secondary, emoji="◀️",
@@ -3095,6 +3288,13 @@ class OCRSettingsView(discord.ui.View):
             option.default = (str(self.save_images_setting) == option.value)
         self.image_save_select_item.callback = self.image_save_select_callback
         self.add_item(self.image_save_select_item)
+
+    async def change_test_fid_button(self, interaction: discord.Interaction):
+        """Handle the change test FID button click."""
+        if not self.ddddocr_available:
+            await interaction.response.send_message("❌ Required library (ddddocr) is not installed or failed to load.", ephemeral=True)
+            return
+        await interaction.response.send_modal(TestFIDModal(self.cog))
 
     async def enable_ocr_button(self, interaction: discord.Interaction):
         if not self.ddddocr_available:
@@ -3136,7 +3336,7 @@ class OCRSettingsView(discord.ui.View):
         method = "N/A"
         confidence = 0.0
         solve_duration = 0.0
-        test_fid = "244886619"
+        test_fid = self.cog.get_test_fid()
 
         try:
             logger.info(f"[Test Button] Fetching captcha for test FID {test_fid}...")
