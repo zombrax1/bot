@@ -94,13 +94,24 @@ if __name__ == "__main__":
             os.execl(python, python, script_path, *sys.argv[1:])
         
     def install_packages(requirements_txt_path: str) -> bool:
-        full_command = [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir", "--ignore-requires-python", "--force-reinstall"]
+        with open(requirements_txt_path, "r") as f: 
+            lines = [line.strip() for line in f]
         
-        try:
-            subprocess.check_call(full_command, timeout=1200)
-            return True
-        except Exception as _:
-            return False
+        success = []
+            
+        for dependency in lines:
+            full_command = [sys.executable, "-m", "pip", "install", dependency, "--no-cache-dir", "--force-reinstall"]
+            
+            if dependency.startswith("ddddocr") and (sys.version_info.major == 3 and sys.version_info.minor == 13):
+                full_command = full_command + ["--ignore-requires-python"]
+        
+            try:
+                subprocess.check_call(full_command, timeout=1200)
+                success.append(0)
+            except Exception as _:
+                success.append(1)
+                
+        return sum(success) == 0
 
     async def check_and_update_files():
         latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
