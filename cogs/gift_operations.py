@@ -3265,19 +3265,10 @@ class OCRSettingsView(discord.ui.View):
         self.change_test_fid_button_item.callback = self.change_test_fid_button
         self.add_item(self.change_test_fid_button_item)
 
-        # Row 1: Back Button
-        self.back_button_item = discord.ui.Button(
-            label="Back", style=discord.ButtonStyle.secondary, emoji="◀️",
-            custom_id="back", row=1,
-            disabled=False
-        )
-        self.back_button_item.callback = self.back_button
-        self.add_item(self.back_button_item)
-
         # Row 2: Image Save Select Menu
         self.image_save_select_item = discord.ui.Select(
             placeholder="Select Captcha Image Saving Option",
-            min_values=1, max_values=1, row=2, custom_id="image_save_select",
+            min_values=1, max_values=1, row=1, custom_id="image_save_select",
             options=[
                 discord.SelectOption(label="Don't Save Any Images", value="0", description="Fastest, no disk usage"),
                 discord.SelectOption(label="Save Only Failed Captchas", value="1", description="For debugging server rejects"),
@@ -3541,9 +3532,6 @@ class OCRSettingsView(discord.ui.View):
         else:
             self.cog.logger.error(f"OCR settings update failed: {message_from_task}")
             await progress_message.edit(content=f"❌ {message_from_task}")
-
-    async def back_button(self, interaction: discord.Interaction):
-        await self.cog.show_gift_menu(interaction)
 
 async def setup(bot):
     await bot.add_cog(GiftOperations(bot)) 
