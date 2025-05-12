@@ -53,8 +53,10 @@ jobs:
     - name: Check for Ddddocr solver initialization
       run: |
         sleep 10 # Give the OCR time to start
-        cat log/gift_ops.txt
-        if ! grep -q "DdddOcr solver initialized successfully." log/gift_ops.txt; then
-          echo "Required message not found in logs/gift_ops.txt. Failing the job."
+        cat log/gift_solver.txt || echo "log/gift_solver.txt not found or empty."
+        if ! grep -q "DdddOcr test classification successful" log/gift_solver.txt; then
+          echo "Required ddddocr test message not found in log/gift_solver.txt. Failing the job."
           exit 1
+        else
+          echo "Ddddocr test classification successful message found in log/gift_solver.txt!"
         fi
