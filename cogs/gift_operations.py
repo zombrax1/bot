@@ -183,13 +183,6 @@ class GiftOperations(commands.Cog):
                     self.captcha_solver = None
                 else: # Ensure success is logged here for the CI
                     self.logger.info("GiftOps __init__: DdddOcr solver initialized successfully.")
-                    try: # Try force flushing the buffer to log the message
-                        for handler in self.logger.handlers:
-                           if isinstance(handler, logging.FileHandler):
-                               handler.flush()
-                        self.logger.info("Log flushed after successful init.")
-                    except Exception as flush_err:
-                        print(f"CRITICAL: Error flushing logger: {flush_err}", file=sys.stderr)
 
         except ImportError as lib_err:
             self.logger.exception(f"GiftOps __init__: ERROR - Missing required library for OCR (likely ddddocr): {lib_err}. Captcha solving disabled.")
