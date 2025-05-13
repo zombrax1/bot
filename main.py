@@ -200,7 +200,7 @@ if __name__ == "__main__":
                             try:
                                 if os.path.exists("main.py.bak"):
                                     os.remove("main.py.bak")
-                            except:
+                            except Exception as _:
                                 pass
                                 
                             try:
@@ -212,7 +212,7 @@ if __name__ == "__main__":
                                     if os.path.exists("main.py"):
                                         os.remove("main.py")
                                         print(Fore.YELLOW + "Removed current main.py" + Style.RESET_ALL)
-                                except:
+                                except Exception as _:
                                     print(Fore.RED + "Warning: Could not backup or remove current main.py" + Style.RESET_ALL)
                             
                             try:
