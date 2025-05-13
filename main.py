@@ -272,11 +272,24 @@ if __name__ == "__main__":
                         return  
         else:
             print(Fore.RED + f"Failed to fetch latest release info. HTTP status: {latest_release_resp.status_code}" + Style.RESET_ALL)
+            
+    def check_dependencies():
+        try:
+            verify_command = "import numpy; import PIL; import cv2; import onnxruntime; import ddddocr; print('All OCR dependencies imported successfully!')"
+            subprocess.check_call([sys.executable, "-c", verify_command])
+            print(Fore.GREEN + "All OCR dependencies verified!" + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.RED + f"OCR dependencies verification failed: {e}" + Style.RESET_ALL)
+            print(Fore.YELLOW + "Visual C++ Redistributable may be missing or outdated." + Style.RESET_ALL)
+            print(Fore.YELLOW + "Please install the latest Visual C++ Redistributable from Microsoft:" + Style.RESET_ALL)
+            print(Fore.YELLOW + "https://aka.ms/vs/17/release/vc_redist.x64.exe" + Style.RESET_ALL)
+            return False
     
     import asyncio
     from datetime import datetime
             
     asyncio.run(check_and_update_files())
+    check_dependencies()
             
     import discord
     from discord.ext import commands
