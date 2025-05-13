@@ -33,7 +33,12 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
  - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
  - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
 
-### For Existing Installations (Upgrading):
+### For Existing Installations (Running v1.0.0 already):
+
+- If you **already have a working instance**: just restart the bot. It will either update automatically or prompt you, depending on your `--autoupdate` setting.
+- If your **instance was previously stuck or broken**: download the latest [main.py](<https://github.com/whiteout-project/bot/blob/v1.1.0/main.py>) and overwrite your existing one. It will handle requirement installation for you.
+
+### For Existing Installations (Upgrading from versions before 1.0.0):
 
 1.  **🛑 Stop the Bot:** Ensure your Discord bot's `main.py` script is not currently running.
 
@@ -51,24 +56,26 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 
 5.  **▶️ Restart the Bot:**
     *   Open a terminal or command prompt **in your bot's main directory**.
-    *   Run the bot's startup command as you normally would (e.g., `python main.py`). *note: an update to v1.0.0 will show up, update to this to get the new patch*
+    *   Run the bot's startup command as you normally would (e.g., `python main.py`). *Note: an update to v1.1.0 will show up, enter 'y' to get the new patch*
     *   Observe the console output. This step might take a few minutes, depending on your internet connection.
     *   If the automatic installation completed successfully, the bot should continue starting up.
     *   **If the automatic installation fails:** Please contact the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
 
 ### For New Installations:
 
-1.  **⬇️ Download the Complete Package:**
-    *   Download the [full release page](https://github.com/whiteout-project/bot/archive/refs/tags/v1.0.0.zip)
-    *   Extract the ZIP to a new directory where you want to run the bot
+1.  **⬇️ Download the Installer:**
+    *   Download the [install.py file](https://github.com/whiteout-project/install/blob/main/install.py)
+    *   Place it in a new directory where you want to run the bot
 
-2.  **▶️ Start the Bot:**
-    *   Open a terminal or command prompt **in your bot's main directory**.
-    *   Run `python main.py` to start the bot
-    *   If prompted for a Discord bot token, enter your bot token
-    *   The bot should initialize and connect to Discord
+2.  **▶️ Start the Installer:**
+    *   Open a terminal or command prompt **in the new directory you created where install.py is located**.
+    *   Run `python install.py` to install the bot. This should automatically pull main.py and other files into the directory.
 
-3.  **🔧 Run Settings:**
+3.  **▶️ Start the Bot:**
+    *   In your terminal or command prompt **in the same directory you created**, run `python main.py` to start the bot.
+    *   When prompted for a Discord bot token, enter your bot token. The bot should now initialize and connect to Discord.
+
+4.  **🔧 Run /settings in Discord:**
     *   Remember to run /settings for the bot in Discord to configure yourself as the admin.
 
 ---
@@ -86,7 +93,35 @@ If you encounter issues with this patch, reach out to the [project admins](https
 
 ## 🛠️ Patch Notes 
 
-### Version v1.0.0 (Current)
+### Version v1.1.0 (Current)
+
+- 💾 **More robust file handling & backups during updates**  
+  Now gracefully sidesteps Windows' favorite pastime: locking files for no reason. May your `main.py` live a long, crash-free life.
+- ✅ **`ddddocr` installation verification added**  
+  Checks that `ddddocr` and its clingy dependencies are *actually* installed. No more “I installed it, I swear” gaslighting.
+- 🎯 **Selective `--ignore-requires-python` usage**  
+  Only applies the Python rule-bending to `ddddocr`, instead of every package. Because not every package needs special treatment.
+- 🐛 **Verbose flag added for package installs**  
+  Need to know exactly how the package installation broke? There’s a --verbose flag for that now.
+- 🧾 **Added `colorama` and `requests` to requirements**  
+  Two more packages join the cult. Because everything is better when you add some color to it.
+- 🚫 **Gift code validation delayed to redemption time**  
+  Codes added via "Create Gift Code" or the Gift Code Channel are no longer validated immediately. Instead:
+  - They are stored in DB with status `pending`
+  - On first use (or during periodic validation):
+    - If valid: ✅ marked as `valid`
+    - If invalid: ❌ redemption stops, status updated to `invalid`
+  - Only validated codes hit the giftcode API (once implemented), reducing unnecessary API traffic.
+- 🔄 **New “Change Test FID” button for admins**  
+  Admins can now swap out the test ID used for validating and testing codes. Default: Relo’s ID. Change it. Or don’t. I’m not your dad.
+- 🔙 **Removed Yolo’s favorite back button from CAPTCHA Settings**  
+  The back button on CAPTCHA Settings is gone. Yes, really. It’s gone. Are you happy now, @Destrimna?
+- 🐞 **Miscellaneous bug fixes**  
+  Squashed several minor but persistent gremlins.
+- 📣 **Bear Trap notifications now persist even if the channel disappears**  
+  Previously, if the channel went poof (due to temporary Discord rate limits, for example), all notifications got disabled. That’s been fixed.
+
+### Version v1.0.0
 
 - 🔁 Replaced EasyOCR with ddddocr — Faster, lighter, smarter. Like trading a fax machine for a laser cannon.
 - 🛠️ Force-installs ddddocr v1.5.6 with --ignore-requires-python — Because Python 3.13 broke it, but we broke it back.
