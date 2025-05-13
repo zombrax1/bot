@@ -93,7 +93,7 @@ if __name__ == "__main__":
             print(f"Error restarting: {e}")
             os.execl(python, python, script_path, *sys.argv[1:])
         
-    def install_packages(requirements_txt_path: str) -> bool:
+    def install_packages(requirements_txt_path: str, debug: bool = False) -> bool:
         with open(requirements_txt_path, "r") as f: 
             lines = [line.strip() for line in f]
         
@@ -106,7 +106,11 @@ if __name__ == "__main__":
                 full_command = full_command + ["--ignore-requires-python"]
         
             try:
-                subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if debug:
+                    subprocess.check_call(full_command, timeout=1200)
+                else:
+                    subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
                 success.append(0)
             except Exception as _:
                 success.append(1)
@@ -148,7 +152,7 @@ if __name__ == "__main__":
                 
                 update = False
                 
-                if any([sys.argv[i]== "--autoupdate" for i in range(len(sys.argv))]):
+                if "--autoupdate" in sys.argv:
                     update = True
                 else:
                     print("Note: If your terminal is not interactive, you can use the --autoupdate argument to skip this prompt.")
@@ -224,7 +228,7 @@ if __name__ == "__main__":
                         if os.path.exists("update/requirements.txt"):                      
                             print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
                             
-                            success = install_packages("update/requirements.txt")
+                            success = install_packages("update/requirements.txt", debug="--verbose" in sys.argv or "--debug" in sys.argv)
                             safe_remove_file("update/requirements.txt")
                             
                             if success:
