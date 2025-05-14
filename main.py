@@ -92,6 +92,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error restarting: {e}")
             os.execl(python, python, script_path, *sys.argv[1:])
+            
+    def is_container() -> bool:
+        return os.path.exists("/.dockerenv") or os.path.exists("/var/run/secrets/kubernetes.io")
         
     def install_packages(requirements_txt_path: str, debug: bool = False) -> bool:
         with open(requirements_txt_path, "r") as f: 
@@ -152,12 +155,16 @@ if __name__ == "__main__":
                 
                 update = False
                 
-                if "--autoupdate" in sys.argv:
-                    update = True
+                if not is_container():
+                    if "--autoupdate" in sys.argv:
+                        update = True
+                    else:
+                        print("Note: If your terminal is not interactive, you can use the --autoupdate argument to skip this prompt.")
+                        ask = input("Do you want to update? (y/n): ").strip().lower()
+                        update = ask == "y"
                 else:
-                    print("Note: If your terminal is not interactive, you can use the --autoupdate argument to skip this prompt.")
-                    ask = input("Do you want to update? (y/n): ").strip().lower()
-                    update = ask == "y"
+                    print(Fore.YELLOW + "Running in a container. Skipping update prompt." + Style.RESET_ALL)
+                    update = True
                     
                 if update:
                     if os.path.exists("db") and os.path.isdir("db"):
