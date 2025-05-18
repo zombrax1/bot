@@ -380,7 +380,9 @@ class Alliance(commands.Cog):
                                     color=discord.Color.blue()
                                 )
                                 await select_interaction.response.send_message(embed=progress_embed)
-                                
+                                msg = await select_interaction.original_response()
+                                message_id = msg.id
+
                                 for index, (alliance_id, name, _) in enumerate(alliances):
                                     try:
                                         queue_status_embed = discord.Embed(
@@ -398,8 +400,10 @@ class Alliance(commands.Cog):
                                             ),
                                             color=discord.Color.blue()
                                         )
+                                        channel = select_interaction.channel
+                                        msg = await channel.fetch_message(message_id)
                                         await select_interaction.edit_original_response(embed=queue_status_embed)
-                                        
+
                                         self.c.execute("""
                                             SELECT channel_id FROM alliancesettings WHERE alliance_id = ?
                                         """, (alliance_id,))
@@ -435,7 +439,9 @@ class Alliance(commands.Cog):
                                     ),
                                     color=discord.Color.green()
                                 )
-                                await select_interaction.edit_original_response(embed=queue_complete_embed)
+                                channel = select_interaction.channel
+                                msg = await channel.fetch_message(message_id)
+                                await msg.edit(embed=queue_complete_embed)
                             
                             else:
                                 alliance_id = int(selected_value)
