@@ -221,31 +221,31 @@ class Control(commands.Cog):
 
         if furnace_changes or nickname_changes or kid_changes:
             if furnace_changes:
-                furnace_embed = discord.Embed(
-                    title="🔥 Furnace Level Changes",
-                    description="\n\n".join(furnace_changes),
-                    color=discord.Color.orange()
+                await self.send_embed(
+                    channel=channel,
+                    title=f"🔥 **{alliance_name}** Furnace Level Changes",
+                    description=furnace_changes,
+                    color=discord.Color.orange(),
+                    footer=f"📊 Total Changes: {len(furnace_changes)}"
                 )
-                furnace_embed.set_footer(text=f"📊 Total Changes: {len(furnace_changes)}")
-                await channel.send(embed=furnace_embed)
 
             if nickname_changes:
-                nickname_embed = discord.Embed(
-                    title="📝 Nickname Changes",
-                    description="\n".join(nickname_changes),
-                    color=discord.Color.blue()
+                await self.send_embed(
+                    channel=channel,
+                    title=f"📝 **{alliance_name}** Nickname Changes",
+                    description=nickname_changes,
+                    color=discord.Color.blue(),
+                    footer=f"📊 Total Changes: {len(nickname_changes)}"
                 )
-                nickname_embed.set_footer(text=f"📊 Total Changes: {len(nickname_changes)}")
-                await channel.send(embed=nickname_embed)
 
             if kid_changes:
-                kid_embed = discord.Embed(
-                    title="🌍 State Transfer Notifications",
-                    description="\n\n".join(kid_changes),
-                    color=discord.Color.green()
+                await self.send_embed(
+                    channel=channel,
+                    title=f"🌍 **{alliance_name}** State Transfer Notifications",
+                    description=kid_changes,
+                    color=discord.Color.green(),
+                    footer=f"📊 Total Changes: {len(kid_changes)}"
                 )
-                kid_embed.set_footer(text=f"📊 Total Changes: {len(kid_changes)}")
-                await channel.send(embed=kid_embed)
 
             embed.color = discord.Color.green()
             embed.set_field_at(
@@ -283,14 +283,35 @@ class Control(commands.Cog):
         print(f"{Fore.GREEN}{alliance_name} Alliance Control completed at {end_time.strftime('%Y-%m-%d %H:%M:%S')}{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{alliance_name} Alliance Total Duration: {duration}{Style.RESET_ALL}")
 
-    async def send_embed(self, channel, title, description, color):
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=color
-        )
-        embed.set_footer(text="🔄 Alliance Control System")
-        await channel.send(embed=embed)
+    async def send_embed(self, channel, title, description, color, footer):
+        current_chunk = []
+        current_length = 0
+
+        for desc in description:
+            desc_length = len(desc) + 2
+
+            if current_length + desc_length > 2000:
+                embed = discord.Embed(
+                    title=title,
+                    description="\n\n".join(current_chunk),
+                    color=color
+                )
+                embed.set_footer(text="Alliance Control System")
+                await channel.send(embed=embed)
+                current_chunk = [desc]
+                current_length = desc_length
+            else:
+                current_chunk.append(desc)
+                current_length += desc_length
+
+        if current_chunk:
+            embed = discord.Embed(
+                title=title,
+                description="\n\n".join(current_chunk),
+                color=color
+            )
+            embed.set_footer(text=footer)
+            await channel.send(embed=embed)
 
     async def process_control_queue(self):
         print("[CONTROL] Queue processor started")
