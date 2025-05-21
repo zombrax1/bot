@@ -42,6 +42,10 @@ class Alliance(commands.Cog):
 
     async def view_alliances(self, interaction: discord.Interaction):
         
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ This command must be used in a server, not in DMs.", ephemeral=True)
+            return
+
         user_id = interaction.user.id
         self.c_settings.execute("SELECT id, is_initial FROM admin WHERE id = ?", (user_id,))
         admin = self.c_settings.fetchone()
