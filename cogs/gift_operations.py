@@ -415,7 +415,8 @@ class GiftOperations(commands.Cog):
                 if auto_alliances:
                     self.logger.info(f"GiftOps: [on_message] Triggering auto-use for {len(auto_alliances)} alliances for code '{giftcode}'.")
                     for alliance in auto_alliances:
-                        asyncio.create_task(self.use_giftcode_for_alliance(alliance[0], giftcode))
+                        await self.use_giftcode_for_alliance(alliance[0], giftcode)
+
                 else:
                     self.logger.info(f"GiftOps: [on_message] No alliances configured for auto-use.")
 
@@ -973,7 +974,7 @@ class GiftOperations(commands.Cog):
                     if auto_alliances:
                         self.logger.info(f"GiftOps: [Loop] Triggering auto-use for {len(auto_alliances)} alliances for '{code}'.")
                         for alliance in auto_alliances:
-                            asyncio.create_task(self.use_giftcode_for_alliance(alliance[0], code))
+                            await self.use_giftcode_for_alliance(alliance[0], code)
                 except sqlite3.Error as db_ins_err:
                     self.logger.exception(f"GiftOps: [Loop] DB ERROR inserting code '{code}': {db_ins_err}")
                     processed_code_statuses[code] = "ERROR"
