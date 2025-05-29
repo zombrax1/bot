@@ -124,7 +124,6 @@ class EmbedFieldModal(discord.ui.Modal):
             else:
                 setattr(self.parent_view, self.field_name, value)
 
-            setattr(self.parent_view, self.field_name, self.input_field.value)
             await self.parent_view.cog.update_embed_notification(self.parent_view)
             await self.parent_view.update_embed_view(interaction)
         except Exception as e:
