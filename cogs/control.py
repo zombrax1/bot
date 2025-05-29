@@ -10,9 +10,9 @@ from datetime import datetime
 from colorama import Fore, Style
 import os
 from aiohttp_socks import ProxyConnector
+import traceback
 
 SECRET = 'tB87#kPtkxqOS2'
-
 
 level_mapping = {
     31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
@@ -123,7 +123,6 @@ class Control(commands.Cog):
                 cursor.execute("SELECT value FROM auto LIMIT 1")
                 result = cursor.fetchone()
                 auto_value = result[0] if result else 1
-        
         
         embed = discord.Embed(
             title=f"🏰 {alliance_name} Alliance Control",
