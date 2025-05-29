@@ -10,9 +10,9 @@ from datetime import datetime
 from colorama import Fore, Style
 import os
 from aiohttp_socks import ProxyConnector
+import traceback
 
 SECRET = 'tB87#kPtkxqOS2'
-
 
 level_mapping = {
     31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
@@ -124,7 +124,6 @@ class Control(commands.Cog):
                 result = cursor.fetchone()
                 auto_value = result[0] if result else 1
         
-        
         embed = discord.Embed(
             title=f"🏰 {alliance_name} Alliance Control",
             description="🔍 Checking for changes in member status...",
@@ -147,6 +146,11 @@ class Control(commands.Cog):
             message = await channel.send(embed=embed)
 
         furnace_changes, nickname_changes, kid_changes = [], [], []
+
+        def safe_list(input_list): # Avoid issues with list indexing
+            if not isinstance(input_list, list):
+                return []
+            return [str(item) for item in input_list if item]
 
         i = 0
         while i < total_users:
@@ -224,7 +228,7 @@ class Control(commands.Cog):
                 await self.send_embed(
                     channel=channel,
                     title=f"🔥 **{alliance_name}** Furnace Level Changes",
-                    description=furnace_changes,
+                    description=safe_list(furnace_changes),
                     color=discord.Color.orange(),
                     footer=f"📊 Total Changes: {len(furnace_changes)}"
                 )
@@ -233,7 +237,7 @@ class Control(commands.Cog):
                 await self.send_embed(
                     channel=channel,
                     title=f"📝 **{alliance_name}** Nickname Changes",
-                    description=nickname_changes,
+                    description=safe_list(nickname_changes),
                     color=discord.Color.blue(),
                     footer=f"📊 Total Changes: {len(nickname_changes)}"
                 )
@@ -242,7 +246,7 @@ class Control(commands.Cog):
                 await self.send_embed(
                     channel=channel,
                     title=f"🌍 **{alliance_name}** State Transfer Notifications",
-                    description=kid_changes,
+                    description=safe_list(kid_changes),
                     color=discord.Color.green(),
                     footer=f"📊 Total Changes: {len(kid_changes)}"
                 )
@@ -284,6 +288,9 @@ class Control(commands.Cog):
         print(f"{Fore.YELLOW}{alliance_name} Alliance Total Duration: {duration}{Style.RESET_ALL}")
 
     async def send_embed(self, channel, title, description, color, footer):
+        if isinstance(description, str):
+            description = [description]
+
         current_chunk = []
         current_length = 0
 
