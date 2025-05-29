@@ -1136,11 +1136,11 @@ class GiftOperations(commands.Cog):
                         name="⚠️ Missing Library",
                         value=(
                             "The `ddddocr` library is required for CAPTCHA solving.\n"
-                            "It did not initialize. The bot owner needs to fix this."
-                            "Try the following sequence of commands on the bot command line:"
-                            "pip uninstall ddddocr opencv-python opencv-python-headless onnxruntime numpy -y"
-                            "pip install numpy Pillow opencv-python-headless onnxruntime --no-cache-dir --force-reinstall"
-                            "pip install ddddocr==1.5.6 --no-cache-dir --force-reinstall --ignore-requires-python"
+                            "It did not initialize. The bot owner needs to fix this.\n"
+                            "Try the following sequence of commands on the bot command line:\n"
+                            "```pip uninstall ddddocr opencv-python opencv-python-headless onnxruntime numpy -y\n"
+                            "pip install numpy Pillow opencv-python-headless onnxruntime --no-cache-dir --force-reinstall\n"
+                            "pip install ddddocr==1.5.6 --no-cache-dir --force-reinstall --ignore-requires-python\n"
                         ), inline=False
                     )
 
