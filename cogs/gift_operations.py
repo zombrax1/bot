@@ -548,7 +548,7 @@ class GiftOperations(commands.Cog):
             self.logger.exception(f"Error getting test FID: {e}")
             return "244886619"
 
-    def encode_data(self, data):
+    def encode_data(self, data, debug_sign_error=False):
         secret = self.wos_encrypt_key
         sorted_keys = sorted(data.keys())
         encoded_data = "&".join(
@@ -558,6 +558,15 @@ class GiftOperations(commands.Cog):
             ]
         )
         sign = hashlib.md5(f"{encoded_data}{secret}".encode()).hexdigest()
+
+        if debug_sign_error: # Debug logging for sign error when requested
+            self.logger.error(f"[SIGN ERROR DEBUG] Input data: {data}")
+            self.logger.error(f"[SIGN ERROR DEBUG] Encoded data: {encoded_data}")
+            self.logger.error(f"[SIGN ERROR DEBUG] String being hashed: {encoded_data}{secret}")
+            self.logger.error(f"[SIGN ERROR DEBUG] Secret key: {secret}")
+            self.logger.error(f"[SIGN ERROR DEBUG] Generated signature: {sign}")
+            self.logger.error(f"[SIGN ERROR DEBUG] Final payload: {{'sign': '{sign}', **{data}}}")
+        
         return {"sign": sign, **data}
 
     def get_stove_info_wos(self, player_id):
@@ -733,6 +742,14 @@ class GiftOperations(commands.Cog):
                     status = "USAGE_LIMIT"
                 elif msg == "TIMEOUT RETRY" and err_code == 40004:
                     status = "TIMEOUT_RETRY"
+                elif "sign error" in msg.lower():
+                    status = "SIGN_ERROR"
+                    # Log the request that caused the sign error for debugging purposes
+                    self.logger.error(f"[SIGN ERROR] Sign error detected for FID {player_id}, code {giftcode}")
+                    self.logger.error(f"[SIGN ERROR] Original request data: fid={player_id}, cdk={giftcode}, captcha_code={captcha_code}, time={int(datetime.now().timestamp()*1000)}")
+                    debug_data_to_encode = {"fid": f"{player_id}", "cdk": giftcode, "captcha_code": captcha_code, "time": f"{int(datetime.now().timestamp()*1000)}"}
+                    self.encode_data(debug_data_to_encode, debug_sign_error=True)
+                    self.logger.error(f"[SIGN ERROR] Response that caused sign error: {response_json_redeem}")
                 else:
                     status = "UNKNOWN_API_RESPONSE"
                     self.giftlog.info(f"Unknown API response for {player_id}: msg='{msg}', err_code={err_code}\n")
@@ -2498,13 +2515,38 @@ class GiftOperations(commands.Cog):
                     try:
                         await status_message.edit(embed=embed)
                     except Exception as embed_edit_err:
-                        self.logger.warning(f"GiftOps: WARN - Failed to update progress embed to show code invalidation: {embed_edit_err}")
+                        self.logger.warning(f"GiftOps: Failed to update progress embed to show code invalidation: {embed_edit_err}")
                     
                     if fid not in failed_users_dict:
                         processed_count +=1 
                         failed_count +=1
                         failed_users_dict[fid] = (nickname, f"Led to code invalidation ({response_status})", current_cycle_count + 1)
                     continue
+                
+                if response_status == "SIGN_ERROR":
+                    self.logger.error(f"GiftOps: Sign error detected (likely wrong encrypt key). Stopping redemption for alliance {alliance_id}.")
+                    
+                    embed.title = f"⚙️ Sign Error: {giftcode}"
+                    embed.color = discord.Color.red()
+                    embed.description = (
+                        f"**Bot Configuration Error**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🎁 **Gift Code:** `{giftcode}`\n"
+                        f"🏰 **Alliance:** `{alliance_name}`\n"
+                        f"⚙️ **Reason:** Sign Error (check bot config/encrypt key)\n"
+                        f"📝 **Action:** Redemption stopped. Check bot configuration.\n"
+                        f"📊 **Processed before halt:** {processed_count}/{total_members}\n"
+                        f"⏰ **Time:** <t:{int(datetime.now().timestamp())}:R>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    )
+                    embed.clear_fields()
+                    
+                    try:
+                        await status_message.edit(embed=embed)
+                    except Exception as embed_edit_err:
+                        self.logger.warning(f"GiftOps: Failed to update progress embed for sign error: {embed_edit_err}")
+
+                    break
 
                 # Handle Response
                 mark_processed = False
