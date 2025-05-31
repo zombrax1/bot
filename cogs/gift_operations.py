@@ -211,6 +211,12 @@ class GiftOperations(commands.Cog):
         except Exception as e:
             self.logger.exception(f"Error setting up test FID table: {e}")
 
+    def clean_gift_code(self, giftcode):
+        """Remove invisible Unicode characters (like RLM) that can contaminate gift codes"""
+        import unicodedata
+        cleaned = ''.join(char for char in giftcode if unicodedata.category(char)[0] != 'C')
+        return cleaned.strip()
+    
     @commands.Cog.listener()
     async def on_ready(self):
         """
@@ -379,6 +385,8 @@ class GiftOperations(commands.Cog):
                 code_match = re.search(r'Code:\s*(\S+)', content, re.IGNORECASE)
                 if code_match:
                     giftcode = code_match.group(1)
+            if giftcode:
+                giftcode = self.clean_gift_code(giftcode)
             if not giftcode:
                 self.logger.debug(f"[on_message] No valid gift code format found in message {message.id}")
                 return
@@ -593,7 +601,8 @@ class GiftOperations(commands.Cog):
         return session, response_stove_info
 
     async def claim_giftcode_rewards_wos(self, player_id, giftcode):
-        
+
+        giftcode = self.clean_gift_code(giftcode)
         process_start_time = time.time()
         status = "ERROR"
         image_bytes = None
@@ -954,6 +963,8 @@ class GiftOperations(commands.Cog):
                         if re.match(r'^[a-zA-Z0-9]+$', potential_code):
                             giftcode = potential_code
 
+                if giftcode:
+                    giftcode = self.clean_gift_code(giftcode)
                 if not giftcode:
                     continue
 
@@ -2711,7 +2722,7 @@ class CreateGiftCodeModal(discord.ui.Modal):
         await interaction.response.defer(ephemeral=True)
         logger.info("[CreateGiftCodeModal] Interaction deferred.")
 
-        code = self.giftcode.value
+        code = self.cog.clean_gift_code(self.giftcode.value)
         logger.info(f"[CreateGiftCodeModal] Code entered: {code}")
 
         final_embed = discord.Embed(title="🎁 Gift Code Creation Result")
