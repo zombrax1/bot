@@ -1,12 +1,11 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import os
 import sqlite3
 import asyncio
 import requests
 from .alliance_member_operations import AllianceSelectView
-
-VERSION_URL = "https://raw.githubusercontent.com/Reloisback/Whiteout-Survival-Discord-Bot/refs/heads/main/autoupdateinfo.txt"
 
 class BotOperations(commands.Cog):
     def __init__(self, bot, conn):
@@ -18,6 +17,16 @@ class BotOperations(commands.Cog):
         self.c_alliance = self.alliance_db.cursor()
         self.setup_database()
 
+    def get_current_version(self):
+        """Get current version from version file"""
+        try:
+            if os.path.exists("version"):
+                with open("version", "r") as f:
+                    return f.read().strip()
+            return "v0.0.0"
+        except Exception:
+            return "v0.0.0"
+        
     def setup_database(self):
         try:
             self.settings_cursor.execute("""
@@ -1006,88 +1015,63 @@ class BotOperations(commands.Cog):
                     color=discord.Color.blue() if not updates_needed else discord.Color.yellow()
                 )
 
+                main_embed = discord.Embed(
+                    title="🔄 Bot Update Status",
+                    color=discord.Color.blue() if not updates_needed else discord.Color.yellow()
+                )
+
                 main_embed.add_field(
                     name="Current Version",
                     value=f"`{current_version}`",
                     inline=True
                 )
 
+                main_embed.add_field(
+                    name="Latest Version",
+                    value=f"`{new_version}`",
+                    inline=True
+                )
+
                 if updates_needed:
                     main_embed.add_field(
-                        name="Updates Available",
-                        value="The following files need to be updated:",
-                        inline=False
-                    )
-
-                    update_text = ""
-                    for update in updates_needed:
-                        update_text += f"• `{update['file']}`: {update['current']} → {update['new']}\n"
-                    main_embed.add_field(
-                        name="Files to Update",
-                        value=update_text,
-                        inline=False
+                        name="Status",
+                        value="🔄 **Update Available**",
+                        inline=True
                     )
 
                     if update_notes:
-                        notes_chunks = []
-                        current_chunk = []
-                        current_length = 0
+                        notes_text = "\n".join([f"• {note.lstrip('- *•').strip()}" for note in update_notes[:10]])
+                        if len(update_notes) > 10:
+                            notes_text += f"\n• ... and more!"
                         
-                        for note in update_notes:
-                            note_length = len(note)
-                            if current_length + note_length > 900:
-                                notes_chunks.append(current_chunk)
-                                current_chunk = [note]
-                                current_length = note_length
-                            else:
-                                current_chunk.append(note)
-                                current_length += note_length
-                        
-                        if current_chunk:
-                            notes_chunks.append(current_chunk)
-
-                        if notes_chunks:
-                            first_chunk_text = "\n".join([f"• {note}" for note in notes_chunks[0]])
-                            main_embed.add_field(
-                                name="Update Notes (1/" + str(len(notes_chunks)) + ")",
-                                value=first_chunk_text,
-                                inline=False
-                            )
-
-                        additional_embeds = []
-                        for i, chunk in enumerate(notes_chunks[1:], 2):
-                            embed = discord.Embed(
-                                title=f"🔄 Update Notes ({i}/{len(notes_chunks)})",
-                                color=discord.Color.yellow()
-                            )
-                            chunk_text = "\n".join([f"• {note}" for note in chunk])
-                            embed.description = chunk_text
-                            additional_embeds.append(embed)
+                        main_embed.add_field(
+                            name="Release Notes",
+                            value=notes_text[:1024],  # Discord field limit
+                            inline=False
+                        )
 
                     main_embed.add_field(
                         name="How to Update",
                         value=(
                             "To update to the new version:\n"
-                            "1. Restart the bot\n"
-                            "2. When prompted, accept the update installation\n\n"
-                            "**Note:** The bot will automatically restart after the update."
+                            "🔄 **Restart the bot** (main.py)\n"
+                            "✅ Accept the update when prompted\n\n"
+                            "The bot will automatically download and install the update."
                         ),
                         inline=False
                     )
                 else:
-                    main_embed.description = "✅ Your bot is up to date!"
+                    main_embed.add_field(
+                        name="Status",
+                        value="✅ **Up to Date**",
+                        inline=True
+                    )
+                    main_embed.description = "Your bot is running the latest version!"
 
                 await interaction.response.send_message(
                     embed=main_embed,
                     ephemeral=True
                 )
-
-                if updates_needed and update_notes and len(notes_chunks) > 1:
-                    for additional_embed in additional_embeds:
-                        await interaction.followup.send(
-                            embed=additional_embed,
-                            ephemeral=True
-                        )
 
             except Exception as e:
                 print(f"Check updates error: {e}")
@@ -1211,61 +1195,37 @@ class BotOperations(commands.Cog):
             return False
 
     async def check_for_updates(self):
+        """Check for updates using GitHub releases API"""
         try:
-            response = requests.get(VERSION_URL)
-            if response.status_code != 200:
-                return None, None, [], []
-
-            content = response.text.split('\n')
-            documents = {}
-            updates_needed = []
-            update_notes = []
-
-            doc_section = False
-            update_section = False
+            latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
             
-            for line in content:
-                line = line.strip()
-                
-                if line == "Documants;":
-                    doc_section = True
-                    continue
-                elif line == "Updated Info;":
-                    doc_section = False
-                    update_section = True
-                    continue
-                elif doc_section and '=' in line:
-                    file_name, version = [x.strip() for x in line.split('=')]
-                    documents[file_name] = version
-                elif update_section and line and line != "Updated Info;":
-                    if line.startswith("- "):
+            response = requests.get(latest_release_url, timeout=10)
+            if response.status_code != 200:
+                return None, None, [], False
+
+            latest_release_data = response.json()
+            latest_tag = latest_release_data.get("tag_name", "")
+            current_version = self.get_current_version()
+            
+            if not latest_tag:
+                return current_version, None, [], False
+
+            updates_needed = current_version != latest_tag
+            
+            # Parse release notes
+            update_notes = []
+            release_body = latest_release_data.get("body", "")
+            if release_body:
+                for line in release_body.split('\n'):
+                    line = line.strip()
+                    if line and (line.startswith('-') or line.startswith('*') or line.startswith('•')):
                         update_notes.append(line)
 
-            with sqlite3.connect('db/settings.sqlite') as conn:
-                cursor = conn.cursor()
-                
-                for file_name, new_version in documents.items():
-                    cursor.execute("SELECT version FROM versions WHERE file_name = ?", (file_name,))
-                    current = cursor.fetchone()
-                    current_version = current[0] if current else "No Version"
-                    
-                    if not current or current_version != new_version:
-                        updates_needed.append({
-                            'file': file_name,
-                            'current': current_version,
-                            'new': new_version
-                        })
-
-                cursor.execute("SELECT version FROM versions WHERE file_name = 'main.py'")
-                result = cursor.fetchone()
-                current_main_version = result[0] if result else "No Version"
-                new_main_version = documents.get('main.py', "Unknown")
-
-            return current_main_version, new_main_version, update_notes, updates_needed
+            return current_version, latest_tag, update_notes, updates_needed
 
         except Exception as e:
             print(f"Error checking for updates: {e}")
-            return None, None, [], []
+            return None, None, [], False
 
 async def setup(bot):
     await bot.add_cog(BotOperations(bot, sqlite3.connect('db/settings.sqlite'))) 
