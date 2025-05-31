@@ -30,6 +30,22 @@ class GNCommands(commands.Cog):
                     auto_result = cursor.fetchone()
                     auto_value = auto_result[0] if auto_result else 1
                     
+                    # Check OCR initialization status
+                    ocr_status = "❌"
+                    ocr_details = "Not initialized"
+                    try:
+                        gift_operations_cog = self.bot.get_cog('GiftOperations')
+                        if gift_operations_cog and hasattr(gift_operations_cog, 'captcha_solver'):
+                            if gift_operations_cog.captcha_solver and gift_operations_cog.captcha_solver.is_initialized:
+                                ocr_status = "✅"
+                                ocr_details = "Gift Code Redeemer (OCR) ready"
+                            else:
+                                ocr_details = "Solver not initialized"
+                        else:
+                            ocr_details = "GiftOperations cog not found"
+                    except Exception as e:
+                        ocr_details = f"Error checking OCR: {str(e)[:30]}..."
+                    
                     status_embed = discord.Embed(
                         title="🤖 Bot Successfully Activated",
                         description=(
@@ -39,6 +55,7 @@ class GNCommands(commands.Cog):
                             "✅ Database connections established\n"
                             "✅ Command systems initialized\n"
                             f"{'✅' if auto_value == 1 else '❌'} Alliance Control Messages\n"
+                            f"{ocr_status} {ocr_details}\n"
                             "━━━━━━━━━━━━━━━━━━━━━━\n"
                         ),
                         color=discord.Color.green()
