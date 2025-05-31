@@ -284,26 +284,64 @@ if __name__ == "__main__":
         try:
             # First check if imports work
             verify_command = "import numpy; import PIL; import cv2; import onnxruntime; import ddddocr; print('All OCR dependencies imported successfully!')"
-            subprocess.check_call([sys.executable, "-c", verify_command])
-            print(Fore.GREEN + "All OCR dependencies verified!" + Style.RESET_ALL)
+            result = subprocess.run([sys.executable, "-c", verify_command], 
+                                capture_output=True, text=True)
             
-            # Next, check if we can create a ddddocr object
-            ocr_test_command = "import ddddocr\ntry:\n    ocr = ddddocr.DdddOcr(show_ad=False)\n    print(\"OCR object created successfully\")\nexcept Exception as e:\n    print(f\"Error creating OCR object: {e}\")\n    exit(1)"
-            result = subprocess.run([sys.executable, "-c", ocr_test_command], 
-                                   capture_output=True, text=True)
+            # If verification fails, try to install dependencies
+            if result.returncode != 0:
+                print(Fore.YELLOW + "OCR dependencies missing. Installing..." + Style.RESET_ALL)
+                
+                # Install dependencies individually
+                dependencies = ["numpy", "Pillow", "opencv-python-headless", "onnxruntime"]
+                
+                for dep in dependencies:
+                    try:
+                        subprocess.check_call([
+                            sys.executable, "-m", "pip", "install", 
+                            dep, "--no-cache-dir", "--force-reinstall"
+                        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+                    except:
+                        pass
+                
+                # Install ddddocr with special handling on Python 3.13+
+                try:
+                    cmd = [sys.executable, "-m", "pip", "install", "ddddocr==1.5.6", 
+                        "--no-cache-dir", "--force-reinstall"]
+                    if sys.version_info.major == 3 and sys.version_info.minor >= 13:
+                        cmd.append("--ignore-requires-python")
+                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+                except:
+                    pass
+                
+                # Retry verification after installation
+                result = subprocess.run([sys.executable, "-c", verify_command], 
+                                    capture_output=True, text=True)
             
-            if "OCR object created successfully" in result.stdout:
-                print(Fore.GREEN + "OCR object creation verified!" + Style.RESET_ALL)
-                return True
-            else:
-                print(Fore.RED + f"OCR object creation failed: {result.stderr}" + Style.RESET_ALL)
-                if "DLL" in result.stderr:
-                    print(Fore.YELLOW + "Visual C++ Redistributable may be missing or outdated." + Style.RESET_ALL)
-                    print(Fore.YELLOW + "Please install the latest Visual C++ Redistributable from Microsoft:" + Style.RESET_ALL)
-                    print(Fore.YELLOW + "https://aka.ms/vs/17/release/vc_redist.x64.exe" + Style.RESET_ALL)
+            if result.returncode == 0:
+                print(Fore.GREEN + "All OCR dependencies verified!" + Style.RESET_ALL)
+                
+                # Check if we can create a ddddocr object
+                ocr_test_command = "import ddddocr\ntry:\n    ocr = ddddocr.DdddOcr(show_ad=False)\n    print(\"OCR object created successfully\")\nexcept Exception as e:\n    print(f\"Error creating OCR object: {e}\")\n    exit(1)"
+                result = subprocess.run([sys.executable, "-c", ocr_test_command], 
+                                    capture_output=True, text=True)
+                
+                if "OCR object created successfully" in result.stdout:
+                    print(Fore.GREEN + "OCR object creation verified!" + Style.RESET_ALL)
+                    return True
                 else:
-                    print(Fore.YELLOW + "OCR initialization failed. This might affect CAPTCHA solving." + Style.RESET_ALL)
+                    print(Fore.RED + f"OCR object creation failed: {result.stderr}" + Style.RESET_ALL)
+                    if "DLL" in result.stderr:
+                        print(Fore.YELLOW + "Visual C++ Redistributable may be missing or outdated." + Style.RESET_ALL)
+                        print(Fore.YELLOW + "Please install the latest Visual C++ Redistributable from Microsoft:" + Style.RESET_ALL)
+                        print(Fore.YELLOW + "https://aka.ms/vs/17/release/vc_redist.x64.exe" + Style.RESET_ALL)
+                        print(Fore.YELLOW + "Make sure to install the 64-bit version for most systems!" + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + "OCR initialization failed. This might affect CAPTCHA solving." + Style.RESET_ALL)
+                    return False
+            else:
+                print(Fore.RED + f"OCR dependencies verification failed: {result.stderr}" + Style.RESET_ALL)
                 return False
+                
         except Exception as e:
             print(Fore.RED + f"OCR dependencies verification failed: {e}" + Style.RESET_ALL)
             return False
