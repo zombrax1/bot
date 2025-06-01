@@ -1,6 +1,10 @@
 import subprocess
 import sys
 
+if "linux" in sys.platform and sys.prefix == sys.base_prefix:
+    print("please run this script in a venv (virtual environment) to avoid dependency conflicts.")
+    sys.exit(0)
+
 try:
     from colorama import Fore, Style, init
     import requests
@@ -121,16 +125,16 @@ if __name__ == "__main__":
         return sum(success) == 0
 
     def safe_remove_file(file_path):
-            """Safely remove a file if it exists."""
-            if os.path.exists(file_path) and os.path.isfile(file_path):
-                try:
-                    os.remove(file_path)
-                    return True
-                except PermissionError:
-                    print(Fore.YELLOW + f"Warning: Access Denied. Could not remove '{file_path}'. Check permissions or if file is in use." + Style.RESET_ALL)
-                except OSError as e:
-                    print(Fore.YELLOW + f"Warning: Could not remove '{file_path}': {e}" + Style.RESET_ALL)
-            return False
+        """Safely remove a file if it exists."""
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            try:
+                os.remove(file_path)
+                return True
+            except PermissionError:
+                print(Fore.YELLOW + f"Warning: Access Denied. Could not remove '{file_path}'. Check permissions or if file is in use." + Style.RESET_ALL)
+            except OSError as e:
+                print(Fore.YELLOW + f"Warning: Could not remove '{file_path}': {e}" + Style.RESET_ALL)
+        return False
 
     async def check_and_update_files():
         latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
@@ -300,7 +304,7 @@ if __name__ == "__main__":
                             sys.executable, "-m", "pip", "install", 
                             dep, "--no-cache-dir", "--force-reinstall"
                         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
-                    except:
+                    except Exception as _:
                         pass
                 
                 # Install ddddocr with special handling on Python 3.13+
@@ -310,7 +314,7 @@ if __name__ == "__main__":
                     if sys.version_info.major == 3 and sys.version_info.minor >= 13:
                         cmd.append("--ignore-requires-python")
                     subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
-                except:
+                except Exception as _:
                     pass
                 
                 # Retry verification after installation
