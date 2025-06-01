@@ -4,3 +4,4 @@ db.bak
 log
 bot_token.txt
 version
+.python-version
