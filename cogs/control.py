@@ -367,7 +367,10 @@ class Control(commands.Cog):
                     color=discord.Color.red()
                 )
                 try:
-                    await channel.send(embed=error_embed)
+                    if channel is not None: # Check if channel exists before trying to send
+                        await channel.send(embed=error_embed)
+                    else:
+                        print(f"[ERROR] Cannot send error message - no channel for alliance {alliance_id}")
                 except:
                     pass
                 
