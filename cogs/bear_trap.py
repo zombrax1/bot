@@ -6,9 +6,8 @@ import pytz
 import os
 import asyncio
 import json
-import urllib.parse
 import traceback
-
+import time
 
 class BearTrap(commands.Cog):
     def __init__(self, bot):
@@ -18,6 +17,10 @@ class BearTrap(commands.Cog):
         os.makedirs('db', exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.cursor = self.conn.cursor()
+
+        # Rate limiting for channel unavailable warnings
+        self.channel_warning_timestamps = {}
+        self.channel_warning_interval = 300
 
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS bear_notifications (
@@ -90,6 +93,16 @@ class BearTrap(commands.Cog):
 
         if hasattr(self, 'notification_task'):
             self.notification_task.cancel()
+
+    def should_warn_about_channel(self, channel_id: int) -> bool:
+        """Check if we should warn about this channel being unavailable."""
+        current_time = time.time()
+        last_warning = self.channel_warning_timestamps.get(channel_id, 0)
+        
+        if current_time - last_warning >= self.channel_warning_interval:
+            self.channel_warning_timestamps[channel_id] = current_time
+            return True
+        return False
 
     async def save_notification(self, guild_id: int, channel_id: int, start_date: datetime,
                                 hour: int, minute: int, timezone: str, description: str,
@@ -252,13 +265,8 @@ class BearTrap(commands.Cog):
 
             channel = self.bot.get_channel(channel_id)
             if not channel:
-                print(f"Warning: Channel {channel_id} not found for notification {id}.")
-                # self.cursor.execute("""
-                #     UPDATE bear_notifications
-                #     SET is_enabled = 0
-                #     WHERE id = ?
-                # """, (id,))
-                # self.conn.commit()
+                if self.should_warn_about_channel(channel_id):
+                    print(f"Warning: Channel {channel_id} not found for notification {id}.")
                 return
 
             tz = pytz.timezone(timezone)
