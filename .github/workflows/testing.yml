@@ -47,22 +47,25 @@ jobs:
     - name: Run script and wait for activation message
       run: |
         source venv/bin/activate
-        python3 main.py --autoupdate | while read -r line; do
-          echo "$line"
-          if [[ "$line" == *"Logged in as CI Bot#9154"* ]]; then
-            echo "Bot is logged in, waiting 15 sec before ending test..."
-            sleep 15
-            break
+        timeout 60 python3 main.py --autoupdate &
+        BOT_PID=$!
+        
+        # Wait for login message in logs
+        for i in {1..30}; do
+          if ps -p $BOT_PID > /dev/null; then
+            if [[ -f "log/gift_solver.txt" ]] && grep -q "DdddOcr test classification successful" log/gift_solver.txt; then
+              echo "Bot logged in successfully and OCR initialized!"
+              kill $BOT_PID 2>/dev/null || true
+              wait $BOT_PID 2>/dev/null || true
+              exit 0
+            fi
+            sleep 2
+          else
+            echo "Bot process ended unexpectedly"
+            exit 1
           fi
         done
-
-    - name: Check for Ddddocr solver initialization
-      run: |
-        sleep 10 # Give the OCR time to start
-        cat log/gift_solver.txt || echo "log/gift_solver.txt not found or empty."
-        if ! grep -q "DdddOcr test classification successful" log/gift_solver.txt; then
-          echo "Required ddddocr test message not found in log/gift_solver.txt. Failing the job."
+          
+          echo "Timeout waiting for bot login"
+          kill $BOT_PID 2>/dev/null || true
           exit 1
-        else
-          echo "Ddddocr test classification successful message found in log/gift_solver.txt!"
-        fi
