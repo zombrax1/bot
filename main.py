@@ -5,8 +5,16 @@ import os
 def is_container() -> bool:
     return os.path.exists("/.dockerenv") or os.path.exists("/var/run/secrets/kubernetes.io")
 
+def is_ci_environment() -> bool:
+    """Check if running in a CI environment"""
+    ci_indicators = [
+        'CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 
+        'JENKINS_URL', 'TRAVIS', 'CIRCLECI', 'GITLAB_CI'
+    ]
+    return any(os.getenv(indicator) for indicator in ci_indicators)
+
 # Handle venv setup
-if sys.prefix == sys.base_prefix and not is_container():
+if sys.prefix == sys.base_prefix and not is_container() and not is_ci_environment():
     print("Running the bot in a venv (virtual environment) to avoid dependency conflicts.")
     venv_path = "bot_venv"
 
