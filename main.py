@@ -80,45 +80,116 @@ except ImportError:
         print("Please install requests manually: pip install requests")
         sys.exit(1)
 
+# Configuration for multiple update sources
+UPDATE_SOURCES = [
+    {
+        "name": "GitLab",
+        "api_url": "https://gitlab.whiteout-bot.com/api/v4/projects/1/releases",
+        "project_id": 1,
+        "primary": True
+    },
+    {
+        "name": "GitHub",
+        "api_url": "https://api.github.com/repos/whiteout-project/bot/releases/latest",
+        "primary": False
+    }
+    # Can add more sources here as needed
+]
+
+def get_latest_release_info():
+    """Try to get latest release info from multiple sources."""
+    for source in UPDATE_SOURCES:
+        try:
+            print(f"Checking for updates from {source['name']}...")
+            
+            if source['name'] == "GitHub":
+                response = requests.get(source['api_url'], timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "tag_name": data["tag_name"],
+                        "body": data["body"],
+                        "download_url": data["assets"][0]["browser_download_url"] if data["assets"] else None,
+                        "source": source['name']
+                    }
+                    
+            elif source['name'] == "GitLab":
+                response = requests.get(source['api_url'], timeout=30)
+                if response.status_code == 200:
+                    releases = response.json()
+                    if releases:
+                        latest = releases[0]  # GitLab returns array, first is latest
+                        # For GitLab, we use the generic packages API to get patch.zip
+                        project_id = source.get('project_id', 1)
+                        tag_name = latest['tag_name']
+                        download_url = f"https://gitlab.whiteout-bot.com/api/v4/projects/{project_id}/packages/generic/release/{tag_name}/patch.zip"
+                        return {
+                            "tag_name": tag_name,
+                            "body": latest.get("description", "No release notes available"),
+                            "download_url": download_url,
+                            "source": source['name']
+                        }
+            
+            # Add handling for other sources here
+            
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None:
+                if e.response.status_code == 404:
+                    print(f"{source['name']} repository not found or unavailable")
+                elif e.response.status_code in [403, 429]:
+                    print(f"{source['name']} access limited (rate limit or access denied)")
+                else:
+                    print(f"{source['name']} returned HTTP {e.response.status_code}")
+            else:
+                print(f"{source['name']} connection failed")
+            continue
+        except Exception as e:
+            print(f"Failed to check {source['name']}: {e}")
+            continue
+        
+    print("All update sources failed")
+    return None
+
 def ensure_requirements_file():
-    """Ensure requirements.txt exists, download from latest release if needed."""
+    """Ensure requirements.txt exists, download from available sources if needed."""
     if os.path.exists("requirements.txt"):
         return True
     
-    print("requirements.txt not found. Downloading from latest release...")
+    print("requirements.txt not found. Attempting to download from available sources...")
+    
+    release_info = get_latest_release_info()
+    if not release_info or not release_info.get("download_url"):
+        print("Could not find a valid download source for requirements.txt")
+        return False
+    
     try:
-        latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
-        latest_release_resp = requests.get(latest_release_url, timeout=30)
+        download_url = release_info["download_url"]
+        print(f"Downloading from {release_info['source']}: {download_url}")
         
-        if latest_release_resp.status_code == 200:
-            latest_release_data = latest_release_resp.json()
-            download_url = latest_release_data["assets"][0]["browser_download_url"]
+        download_resp = requests.get(download_url, timeout=300)
+        if download_resp.status_code == 200:
+            with open("temp_package.zip", "wb") as f:
+                f.write(download_resp.content)
             
-            # Download and extract to get requirements.txt
-            download_resp = requests.get(download_url, timeout=300)
-            if download_resp.status_code == 200:
-                with open("temp_package.zip", "wb") as f:
-                    f.write(download_resp.content)
-                
-                import zipfile
-                with zipfile.ZipFile("temp_package.zip", 'r') as zip_ref:
-                    if "requirements.txt" in zip_ref.namelist():
-                        zip_ref.extract("requirements.txt", ".")
-                        print("Successfully downloaded requirements.txt")
-                        
-                        try:
-                            os.remove("temp_package.zip")
-                        except:
-                            pass
-                        
-                        return True
-                
-                try:
-                    os.remove("temp_package.zip")
-                except:
-                    pass
+            import zipfile
+            with zipfile.ZipFile("temp_package.zip", 'r') as zip_ref:
+                if "requirements.txt" in zip_ref.namelist():
+                    zip_ref.extract("requirements.txt", ".")
+                    print("Successfully downloaded requirements.txt")
+                    
+                    try:
+                        os.remove("temp_package.zip")
+                    except:
+                        pass
+                    
+                    return True
+            
+            try:
+                os.remove("temp_package.zip")
+            except:
+                pass
         
-        print("Failed to download requirements.txt from release")
+        print(f"Failed to download from {release_info['source']}")
         return False
         
     except Exception as e:
@@ -286,7 +357,7 @@ except ImportError as e:
 import warnings
 import shutil
 
-print("Removing unneccesary files...")
+print("Removing unnecessary files...")
 
 v1_path = "V1oldbot"
 if os.path.exists(v1_path) and os.path.isdir(v1_path):
@@ -399,13 +470,11 @@ if __name__ == "__main__":
         return sum(success) == 0
     
     async def check_and_update_files():
-        latest_release_url = "https://api.github.com/repos/whiteout-project/bot/releases/latest"
+        release_info = get_latest_release_info()
         
-        latest_release_resp = requests.get(latest_release_url)
-        
-        if latest_release_resp.status_code == 200:
-            latest_release_data = latest_release_resp.json()
-            latest_tag = latest_release_data["tag_name"]
+        if release_info:
+            latest_tag = release_info["tag_name"]
+            source_name = release_info["source"]
             
             if os.path.exists("version"):
                 with open("version", "r") as f:
@@ -414,9 +483,9 @@ if __name__ == "__main__":
                 current_version = "v0.0.0"
                         
             if current_version != latest_tag:
-                print(Fore.YELLOW + f"New version available: {latest_tag}" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"New version available: {latest_tag} (from {source_name})" + Style.RESET_ALL)
                 print("Update Notes:")
-                print(latest_release_data["body"])
+                print(release_info["body"])
                 print()
                 
                 update = False
@@ -450,9 +519,14 @@ if __name__ == "__main__":
                         except Exception as e:
                             print(Fore.RED + f"WARNING: Failed to create database backup: {e}" + Style.RESET_ALL)
                                             
-                    download_url = latest_release_data["assets"][0]["browser_download_url"]
+                    download_url = release_info["download_url"]
+                    if not download_url:
+                        print(Fore.RED + "No download URL available for this release" + Style.RESET_ALL)
+                        return
+                        
+                    print(Fore.YELLOW + f"Downloading update from {source_name}..." + Style.RESET_ALL)
                     safe_remove_file("package.zip")
-                    download_resp = requests.get(download_url)
+                    download_resp = requests.get(download_url, timeout=600)
                     
                     if download_resp.status_code == 200:
                         with open("package.zip", "wb") as f:
@@ -538,13 +612,13 @@ if __name__ == "__main__":
                         with open("version", "w") as f:
                             f.write(latest_tag)
                         
-                        print(Fore.GREEN + "Update completed successfully. Restarting bot..." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"Update completed successfully from {source_name}. Restarting bot..." + Style.RESET_ALL)
                         restart_bot()
                     else:
-                        print(Fore.RED + "Failed to download the update. HTTP status: {download_resp.status_code}" + Style.RESET_ALL)
+                        print(Fore.RED + f"Failed to download the update from {source_name}. HTTP status: {download_resp.status_code}" + Style.RESET_ALL)
                         return  
         else:
-            print(Fore.RED + f"Failed to fetch latest release info. HTTP status: {latest_release_resp.status_code}" + Style.RESET_ALL)
+            print(Fore.RED + "Failed to fetch latest release info from all sources" + Style.RESET_ALL)
         
     import asyncio
     from datetime import datetime
