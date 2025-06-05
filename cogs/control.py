@@ -11,6 +11,7 @@ from colorama import Fore, Style
 import os
 from aiohttp_socks import ProxyConnector
 import traceback
+import ssl
 
 SECRET = 'tB87#kPtkxqOS2'
 
@@ -78,9 +79,25 @@ class Control(commands.Cog):
         form = f"sign={sign}&{form}"
 
         try:
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post(url, headers=headers, data=form, ssl=False) as response:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            timeout = aiohttp.ClientTimeout(total=30, connect=10)
+            connector_kwargs = {
+                'ssl': ssl_context,
+                'limit': 10,
+                'limit_per_host': 5,
+                'enable_cleanup_closed': True
+            }
+            
+            if proxy:
+                connector = ProxyConnector.from_url(proxy, **connector_kwargs)
+            else:
+                connector = aiohttp.TCPConnector(**connector_kwargs)
+                
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                async with session.post(url, headers=headers, data=form) as response:
                     if response.status == 200:
                         return await response.json()
                     else:
