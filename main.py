@@ -83,14 +83,14 @@ except ImportError:
 # Configuration for multiple update sources
 UPDATE_SOURCES = [
     {
-        "name": "GitLab",
-        "api_url": "https://gitlab.whiteout-bot.com/api/v4/projects/1/releases",
-        "project_id": 1,
+        "name": "GitHub",
+        "api_url": "https://api.github.com/repos/whiteout-project/bot/releases/latest",
         "primary": True
     },
     {
-        "name": "GitHub",
-        "api_url": "https://api.github.com/repos/whiteout-project/bot/releases/latest",
+        "name": "GitLab",
+        "api_url": "https://gitlab.whiteout-bot.com/api/v4/projects/1/releases",
+        "project_id": 1,
         "primary": False
     }
     # Can add more sources here as needed
