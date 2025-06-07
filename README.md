@@ -1,10 +1,12 @@
 # Whiteout Survival Discord Bot
 
+Whiteout Survival Discord Bot that supports alliance management, event reminders, gift code redemption and more.
+
 This guide explains how to manually update your existing bot installation so that gift code redemption works again.
 
 `v1.0.0` is the last version that needs to be patched manually. If you run this version, you will be able to update via the autoupdate system in the future.
 
-This bot is a new, actively maintained version of the original bot created by Reloisback. You can find the original repository [here](https://github.com/Reloisback/Whiteout-Survival-Discord-Bot/blob/main/README.md).
+This bot is a new, actively maintained version of the original bot created by Reloisback.
 
 ## 🖥️ System Requirements & Prerequisites
 
@@ -55,6 +57,8 @@ Running v1.0.0 or higher already:
 - If you **already have a working instance**: just restart the bot. It will either update automatically or prompt you, depending on your `--autoupdate` setting.
 - If your **instance was previously stuck or broken**: download the latest [main.py](<https://github.com/whiteout-project/bot/blob/v1.1.0/main.py>) and overwrite your existing one. It will handle requirement installation for you.
 
+---
+
 ### Upgrading Legacy Installations
 Upgrading from the "Relo/Patch Versions" before 1.0.0:
 
@@ -78,6 +82,8 @@ Upgrading from the "Relo/Patch Versions" before 1.0.0:
     *   Observe the console output. This step might take a few minutes, depending on your internet connection.
     *   If the automatic installation completed successfully, the bot should continue starting up.
     *   **If the automatic installation fails:** Please contact the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
+
+---
 
 ### For New Installations:
 
