@@ -33,12 +33,30 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
  - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
  - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
 
-### For Existing Installations (Running v1.0.0 already):
+### ⚙️ GitHub Downtime
+- While GitHub is down, you will need to [download main.py from here](https://gitlab.whiteout-bot.com/whiteout-project/bot/-/blob/main/main.py?ref_type=heads) and replace your existing one, then restart the bot and answer the prompt if needed to upgrade.
+- Once GitHub is back (if it's back), then you could just upgrade by restarting the bot directly as described below if running an existing installation.
+
+### ⚠️ Python 3.13 Users: Read This or Else!
+- **`ddddocr` still doesn’t support Python 3.13+.**  
+  → Please try Python 3.12 if you hit OCR-related dependency issues.  
+  (We know. It’s tragic. But it works.)
+
+### ⚠️ Alpine Container Base - Not Supported!
+- Some container hosting platforms (such as KataBump) may run into **disk space issues** during installation, even if sufficient space appears to be available.  
+- This typically occurs because these platforms use **Alpine Linux** or similar Linux distro, which does not include the standard `glibc` C library. As a result, dependencies like [OpenCV](https://pypi.org/project/opencv-python-headless/) lack pre-built wheels for this environment, forcing Python to compile them from source. The build process consumes **several gigabytes of disk space**, typically exceeding the container's limits and causing installation to fail.  
+- ✅ To avoid this, consider using a container base image that includes `glibc`.
+
+---
+
+### Upgrading Existing Installations
+Running v1.0.0 or higher already:
 
 - If you **already have a working instance**: just restart the bot. It will either update automatically or prompt you, depending on your `--autoupdate` setting.
 - If your **instance was previously stuck or broken**: download the latest [main.py](<https://github.com/whiteout-project/bot/blob/v1.1.0/main.py>) and overwrite your existing one. It will handle requirement installation for you.
 
-### For Existing Installations (Upgrading from versions before 1.0.0):
+### Upgrading Legacy Installations
+Upgrading from the "Relo/Patch Versions" before 1.0.0:
 
 1.  **🛑 Stop the Bot:** Ensure your Discord bot's `main.py` script is not currently running.
 
@@ -93,7 +111,37 @@ If you encounter issues with this patch, reach out to the [project admins](https
 
 ## 🛠️ Patch Notes 
 
-### Version v1.1.0 (Current)
+### Version v1.2.0 (Current)
+- Implemented a **self-hosted GitLab repo** as a backup in case GitHub fails us again.  
+- The bot now checks GitHub first, then falls back to GitLab if needed.
+- The bot **automatically creates and manages Python virtual environments**.  
+- Prevents dependency conflicts and ensures smooth setup.  
+- Fully supports both Windows and Unix-based systems.  
+- Automatically skips venv creation inside Docker/Kubernetes/CI environments.
+- Better troubleshooting help, including the direct Visual C++ Redistributable x64 link.
+- Startup now **auto-reinstalls dependencies** if broken or missing on startup.
+- It also **auto-installs missing cogs** from source if they are not found on startup.
+- Should reduce install/update issues across the board.
+- Web editor? History, at least for now.
+- Thanks to @Destrimna, you can now manage all notifications directly via Discord buttons.
+- Old notifications (Embed or Message) remain fully editable.
+- Added **“Repeat on specific days”** for recurring event scheduling.
+- Replaced the crusty old `wosland.com` PHP API with a modern, self-hosted Python version. (it's almost the same, but it smells new)
+- Gift codes now **auto-sync across all bot instances** again. Enjoy the easy and efficient shared redeeming!
+- Includes solid validation logic to block broken or invalid codes before they break the system.
+- Redemptions now follow **alliance order** instead of chaotic parallel execution.  
+- Fixed the dreaded “Sign Error” caused by sneaky right-to-left (RTL) marker characters
+- Removed dependency on external websites for backup creation.
+- Two backup options now available. Sent to you directly via Discord DM or saved manually to the server
+- Backups are 100% under your control. Use it wisely. Or don't.
+- Removed all remaining **Relo branding** from Support and Startup.
+- Startup now proudly shows off **OCR status** like it's something to brag about.
+- Removed outdated “Buy me a coffee” link. No coffee for scammers. ☕🚫
+- **"Check for Updates"** button works again and compares your version file with the latest release tag on our Github.
+- Tons of minor fixes and improvements.
+- For the full list of ~~bugs~~ features, visit [GitHub Issues](https://github.com/whiteout-project/bot/issues)
+
+### Version v1.1.0
 
 - 💾 **More robust file handling & backups during updates**  
   Now gracefully sidesteps Windows' favorite pastime: locking files for no reason. May your `main.py` live a long, crash-free life.
