@@ -35,10 +35,6 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
  - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
  - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
 
-### ⚙️ GitHub Downtime
-- While GitHub is down, you will need to [download main.py from here](https://gitlab.whiteout-bot.com/whiteout-project/bot/-/blob/main/main.py?ref_type=heads) and replace your existing one, then restart the bot and answer the prompt if needed to upgrade.
-- Once GitHub is back (if it's back), then you could just upgrade by restarting the bot directly as described below if running an existing installation.
-
 ### ⚠️ Python 3.13 Users: Read This or Else!
 - **`ddddocr` still doesn’t support Python 3.13+.**  
   → Please try Python 3.12 if you hit OCR-related dependency issues.  
