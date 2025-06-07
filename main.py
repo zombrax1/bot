@@ -766,8 +766,105 @@ if __name__ == "__main__":
     async def load_cogs():
         cogs = ["olddb", "control", "alliance", "alliance_member_operations", "bot_operations", "logsystem", "support_operations", "gift_operations", "changes", "w", "wel", "other_features", "bear_trap", "id_channel", "backup_operations", "bear_trap_editor"]
         
+        failed_cogs = []
+        
         for cog in cogs:
-            await bot.load_extension(f"cogs.{cog}")
+            try:
+                await bot.load_extension(f"cogs.{cog}")
+            except Exception as e:
+                print(f"✗ Failed to load cog {cog}: {e}")
+                failed_cogs.append(cog)
+        
+        if failed_cogs: # If any cogs failed, try to download missing files from the same release
+            print(f"Attempting to recover {len(failed_cogs)} missing cog files...")
+            
+            # Get current version to download matching source files
+            current_version = "v0.0.0"
+            if os.path.exists("version"):
+                with open("version", "r") as f:
+                    current_version = f.read().strip()
+            
+            # Try to get the release info for current version
+            release_info = None
+            for source in UPDATE_SOURCES:
+                try:
+                    if source['name'] == "GitHub":
+                        response = requests.get(source['api_url'], timeout=30)
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data["tag_name"] == current_version:
+                                release_info = {
+                                    "download_url": f"https://github.com/whiteout-project/bot/archive/refs/tags/{current_version}.zip",
+                                    "source": source['name']
+                                }
+                                break
+                    elif source['name'] == "GitLab":
+                        response = requests.get(source['api_url'], timeout=30)
+                        if response.status_code == 200:
+                            releases = response.json()
+                            for release in releases:
+                                if release['tag_name'] == current_version:
+                                    release_info = {
+                                        "download_url": f"https://gitlab.whiteout-bot.com/whiteout-project/bot/-/archive/{current_version}/bot-{current_version}.zip",
+                                        "source": source['name']
+                                    }
+                                    break
+                            if release_info:
+                                break
+                except:
+                    continue
+            
+            if release_info and release_info.get("download_url"):
+                try:
+                    print(f"Downloading missing files from {release_info['source']}...")
+                    download_resp = requests.get(release_info["download_url"], timeout=300)
+                    
+                    if download_resp.status_code == 200:
+                        with open("temp_recovery.zip", "wb") as f:
+                            f.write(download_resp.content)
+                        
+                        import zipfile
+                        with zipfile.ZipFile("temp_recovery.zip", 'r') as zip_ref:
+                            # Extract cog files
+                            for file_info in zip_ref.namelist():
+                                if "/cogs/" in file_info and file_info.endswith(".py"):
+                                    try: # Strip archive prefix if present
+                                        if file_info.startswith("bot-"):
+                                            target_path = file_info.split("/", 1)[1]
+                                        else:
+                                            target_path = file_info
+                                        
+                                        with zip_ref.open(file_info) as source:
+                                            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                                            with open(target_path, 'wb') as target:
+                                                target.write(source.read())
+                                    except Exception as e:
+                                        print(f"Failed to extract {file_info}: {e}")
+                        
+                        safe_remove_file("temp_recovery.zip")
+                        
+                        # Retry loading failed cogs
+                        retry_failed = []
+                        for cog in failed_cogs:
+                            try:
+                                await bot.load_extension(f"cogs.{cog}")
+                            except Exception as e:
+                                retry_failed.append(cog)
+                        
+                        if retry_failed:
+                            print(f"⚠️ {len(retry_failed)} cogs still failed to load: {', '.join(retry_failed)}")
+                            print("Bot will continue with reduced functionality.")
+                        else:
+                            print("✓ All cogs recovered successfully!")
+                            
+                    else:
+                        print(f"Failed to download recovery files: HTTP {download_resp.status_code}")
+                        
+                except Exception as e:
+                    print(f"Error during cog recovery: {e}")
+                    print("Bot will continue with reduced functionality.")
+            else:
+                print("Could not find matching release for recovery. Bot will continue with reduced functionality.")
 
     @bot.event
     async def on_ready():
