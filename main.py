@@ -425,19 +425,14 @@ if __name__ == "__main__":
         args = [python, script_path] + sys.argv[1:]
 
         if sys.platform == "win32":
-            # For Windows, just exit and let user restart manually with venv command
+            # For Windows, provide direct venv command like initial setup
             print(Fore.GREEN + "Update completed successfully!" + Style.RESET_ALL)
             print(Fore.YELLOW + "Please restart the bot manually to continue:" + Style.RESET_ALL)
+            print(Fore.CYAN + f"  1. Open CMD or PowerShell in this directory: {os.getcwd()}" + Style.RESET_ALL)
             
-            # Check if we're in venv and provide appropriate command
             venv_path = "bot_venv"
-            if sys.prefix != sys.base_prefix:
-                # Already in venv
-                print(Fore.CYAN + f"python {os.path.basename(script_path)}" + Style.RESET_ALL)
-            else:
-                # Not in venv, provide venv command like initial check
-                venv_python_name = os.path.join(venv_path, "Scripts", "python.exe")
-                print(Fore.CYAN + f"{venv_python_name} {os.path.basename(script_path)}" + Style.RESET_ALL)
+            venv_python_name = os.path.join(venv_path, "Scripts", "python.exe")
+            print(Fore.CYAN + f"  2. Run: {venv_python_name} {os.path.basename(script_path)}" + Style.RESET_ALL)
             sys.exit(0)
         else:
             # For non-Windows, try automatic restart
