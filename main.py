@@ -420,17 +420,34 @@ if __name__ == "__main__":
     import requests
 
     def restart_bot():
-        print(Fore.YELLOW + "\nRestarting bot..." + Style.RESET_ALL)
         python = sys.executable
         script_path = os.path.abspath(sys.argv[0])
         args = [python, script_path] + sys.argv[1:]
 
-        try: # Try subprocess.Popen first to avoid issues with blank space in the path on Windows
-            subprocess.Popen(args)
-            os._exit(0)
-        except Exception as e:
-            print(f"Error restarting: {e}")
-            os.execl(python, python, script_path, *sys.argv[1:])
+        if sys.platform == "win32":
+            # For Windows, just exit and let user restart manually with venv command
+            print(Fore.GREEN + "Update completed successfully!" + Style.RESET_ALL)
+            print(Fore.YELLOW + "Please restart the bot manually to continue:" + Style.RESET_ALL)
+            
+            # Check if we're in venv and provide appropriate command
+            venv_path = "bot_venv"
+            if sys.prefix != sys.base_prefix:
+                # Already in venv
+                print(Fore.CYAN + f"python {os.path.basename(script_path)}" + Style.RESET_ALL)
+            else:
+                # Not in venv, provide venv command like initial check
+                venv_python_name = os.path.join(venv_path, "Scripts", "python.exe")
+                print(Fore.CYAN + f"{venv_python_name} {os.path.basename(script_path)}" + Style.RESET_ALL)
+            sys.exit(0)
+        else:
+            # For non-Windows, try automatic restart
+            print(Fore.YELLOW + "Restarting bot..." + Style.RESET_ALL)
+            try:
+                subprocess.Popen(args)
+                os._exit(0)
+            except Exception as e:
+                print(f"Error restarting: {e}")
+                os.execl(python, python, script_path, *sys.argv[1:])
             
     def safe_remove_file(file_path):
         """Safely remove a file if it exists."""
@@ -445,14 +462,14 @@ if __name__ == "__main__":
         return False
 
     def install_packages(requirements_txt_path: str, debug: bool = False) -> bool:
-        """Install packages from requirements.txt file."""
+        """Install packages from requirements.txt file if needed."""
         with open(requirements_txt_path, "r") as f: 
             lines = [line.strip() for line in f]
         
         success = []
             
         for dependency in lines:
-            full_command = [sys.executable, "-m", "pip", "install", dependency, "--no-cache-dir", "--force-reinstall"]
+            full_command = [sys.executable, "-m", "pip", "install", dependency, "--no-cache-dir"]
             
             if dependency.startswith("ddddocr") and (sys.version_info.major == 3 and sys.version_info.minor >= 13):
                 full_command = full_command + ["--ignore-requires-python"]
@@ -573,13 +590,13 @@ if __name__ == "__main__":
                                 return
                             
                         if os.path.exists("update/requirements.txt"):                      
-                            print(Fore.YELLOW + "Installing new requirements..." + Style.RESET_ALL)
+                            print(Fore.YELLOW + "Installing any new requirements..." + Style.RESET_ALL)
                             
                             success = install_packages("update/requirements.txt", debug="--verbose" in sys.argv or "--debug" in sys.argv)
                             safe_remove_file("update/requirements.txt")
                             
                             if success:
-                                print(Fore.GREEN + "Requirements installed." + Style.RESET_ALL)
+                                print(Fore.GREEN + "New requirements installed." + Style.RESET_ALL)
                             else:
                                 print(Fore.RED + "Failed to install requirements." + Style.RESET_ALL)
                                 return
@@ -612,7 +629,7 @@ if __name__ == "__main__":
                         with open("version", "w") as f:
                             f.write(latest_tag)
                         
-                        print(Fore.GREEN + f"Update completed successfully from {source_name}. Restarting bot..." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"Update completed successfully from {source_name}." + Style.RESET_ALL)
                         restart_bot()
                     else:
                         print(Fore.RED + f"Failed to download the update from {source_name}. HTTP status: {download_resp.status_code}" + Style.RESET_ALL)
