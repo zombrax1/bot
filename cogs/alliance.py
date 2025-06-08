@@ -111,7 +111,7 @@ class Alliance(commands.Cog):
             for alliance_id, name in alliances if current.lower() in name.lower()
         ][:25]
 
-    @app_commands.command(name="settings", description="Open settings menu.")
+    @app_commands.command(name="settings", description="Open settings menu.", dm_permission=True)
     async def settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
             await interaction.response.send_message(
