@@ -1486,30 +1486,21 @@ class GiftOperations(commands.Cog):
             return self.alliance_cursor.fetchall()
 
         if guild_id:
-            self.alliance_cursor.execute("""
-                SELECT DISTINCT alliance_id, name 
-                FROM alliance_list 
-                WHERE discord_server_id = ?
-            """, (guild_id,))
-            guild_alliances = self.alliance_cursor.fetchall()
-
-            self.settings_cursor.execute("""
-                SELECT alliances_id FROM adminserver WHERE admin = ?
-            """, (user_id,))
+            self.settings_cursor.execute(
+                "SELECT alliances_id FROM adminserver WHERE admin = ?",
+                (user_id,)
+            )
             special_alliance_ids = [row[0] for row in self.settings_cursor.fetchall()]
 
-            if special_alliance_ids:
-                placeholders = ','.join('?' * len(special_alliance_ids))
-                self.alliance_cursor.execute(f"""
-                    SELECT alliance_id, name FROM alliance_list 
-                    WHERE alliance_id IN ({placeholders})
-                """, special_alliance_ids)
-                special_alliances = self.alliance_cursor.fetchall()
-            else:
-                special_alliances = []
+            if not special_alliance_ids:
+                return []
 
-            all_alliances = list(set(guild_alliances + special_alliances))
-            return all_alliances
+            placeholders = ','.join('?' * len(special_alliance_ids))
+            self.alliance_cursor.execute(
+                f"SELECT alliance_id, name FROM alliance_list WHERE alliance_id IN ({placeholders})",
+                special_alliance_ids,
+            )
+            return self.alliance_cursor.fetchall()
 
         return []
 
