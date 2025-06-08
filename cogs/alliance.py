@@ -121,14 +121,7 @@ class Alliance(commands.Cog):
             return
 
         try:
-            perm_check = interaction.guild.get_member(interaction.client.user.id)
-            if not perm_check or not perm_check.guild_permissions.administrator:
-                await interaction.response.send_message(
-                    "Beeb boop 🤖 I need **Administrator** permissions to function. "
-                    "Go to server settings --> Roles --> find my role --> scroll down and turn on Administrator",
-                    ephemeral=True
-                )
-                return
+
                 
             self.c_settings.execute("SELECT COUNT(*) FROM admin")
             admin_count = self.c_settings.fetchone()[0]
@@ -151,7 +144,7 @@ class Alliance(commands.Cog):
                     ),
                     color=discord.Color.green()
                 )
-                await interaction.response.send_message(embed=first_use_embed, ephemeral=True)
+                await interaction.response.send_message(embed=first_use_embed, ephemeral=ephemeral)
                 
                 await asyncio.sleep(3)
                 
@@ -160,8 +153,8 @@ class Alliance(commands.Cog):
 
             if admin is None:
                 await interaction.response.send_message(
-                    "You do not have permission to access this menu.", 
-                    ephemeral=True
+                    "You do not have permission to access this menu.",
+                    ephemeral=ephemeral
                 )
                 return
 
@@ -242,27 +235,28 @@ class Alliance(commands.Cog):
             if admin_count == 0:
                 await interaction.edit_original_response(embed=embed, view=view)
             else:
-                await interaction.response.send_message(embed=embed, view=view)
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=ephemeral)
 
         except Exception as e:
             if not any(error_code in str(e) for error_code in ["10062", "40060"]):
                 print(f"Settings command error: {e}")
             error_message = "An error occurred while processing your request."
             if not interaction.response.is_done():
-                await interaction.response.send_message(error_message, ephemeral=True)
+                await interaction.response.send_message(error_message, ephemeral=ephemeral)
             else:
-                await interaction.followup.send(error_message, ephemeral=True)
+                await interaction.followup.send(error_message, ephemeral=ephemeral)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type == discord.InteractionType.component:
+            ephemeral = interaction.guild is not None
             custom_id = interaction.data.get("custom_id")
             user_id = interaction.user.id
             self.c_settings.execute("SELECT id, is_initial FROM admin WHERE id = ?", (user_id,))
             admin = self.c_settings.fetchone()
 
             if admin is None:
-                await interaction.response.send_message("You do not have permission to perform this action.", ephemeral=True)
+                await interaction.response.send_message("You do not have permission to perform this action.", ephemeral=ephemeral)
                 return
 
             try:
