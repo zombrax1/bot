@@ -113,11 +113,6 @@ class Alliance(commands.Cog):
 
     @app_commands.command(name="settings", description="Open settings menu.")
     async def settings(self, interaction: discord.Interaction):
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "❌ This command must be used in a server, not in DMs.",
-                ephemeral=True,
-            )
             return
 
         try:
