@@ -113,17 +113,15 @@ class Alliance(commands.Cog):
 
     @app_commands.command(name="settings", description="Open settings menu.", dm_permission=True)
     async def settings(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command must be used in a server, not in DMs.",
+                ephemeral=True,
+            )
+            return
+
         try:
-            ephemeral = interaction.guild is not None
-            if interaction.guild is not None:  # Check bot permissions only if in a guild
-                perm_check = interaction.guild.get_member(interaction.client.user.id)
-                if not perm_check or not perm_check.guild_permissions.administrator:
-                    await interaction.response.send_message(
-                        "Beeb boop 🤖 I need **Administrator** permissions to function. "
-                        "Go to server settings --> Roles --> find my role --> scroll down and turn on Administrator",
-                        ephemeral=ephemeral
-                    )
-                    return
+
                 
             self.c_settings.execute("SELECT COUNT(*) FROM admin")
             admin_count = self.c_settings.fetchone()[0]
