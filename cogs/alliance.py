@@ -1448,22 +1448,30 @@ class MemberOperationsView(discord.ui.View):
     async def get_admin_alliances(self, user_id, guild_id):
         self.cog.c_settings.execute("SELECT id, is_initial FROM admin WHERE id = ?", (user_id,))
         admin = self.cog.c_settings.fetchone()
-        
+
         if admin is None:
             return []
-            
+
         is_initial = admin[1]
-        
+
         if is_initial == 1:
             self.cog.c.execute("SELECT alliance_id, name FROM alliance_list ORDER BY name")
-        else:
-            self.cog.c.execute("""
-                SELECT alliance_id, name 
-                FROM alliance_list 
-                WHERE discord_server_id = ? 
-                ORDER BY name
-            """, (guild_id,))
-            
+            return self.cog.c.fetchall()
+
+        self.cog.c_settings.execute(
+            "SELECT alliances_id FROM adminserver WHERE admin = ?",
+            (user_id,),
+        )
+        special_alliance_ids = [aid[0] for aid in self.cog.c_settings.fetchall()]
+
+        if not special_alliance_ids:
+            return []
+
+        placeholders = ','.join('?' * len(special_alliance_ids))
+        self.cog.c.execute(
+            f"SELECT alliance_id, name FROM alliance_list WHERE alliance_id IN ({placeholders}) ORDER BY name",
+            special_alliance_ids,
+        )
         return self.cog.c.fetchall()
 
     @discord.ui.button(label="Add Member", emoji="➕", style=discord.ButtonStyle.primary, custom_id="add_member")
