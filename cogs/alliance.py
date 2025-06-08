@@ -41,9 +41,14 @@ class Alliance(commands.Cog):
             self.conn.commit()
 
     async def view_alliances(self, interaction: discord.Interaction):
-        
+
+        ephemeral = interaction.guild is not None
+
         if interaction.guild is None:
-            await interaction.response.send_message("❌ This command must be used in a server, not in DMs.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ This command must be used in a server, not in DMs.",
+                ephemeral=ephemeral
+            )
             return
 
         user_id = interaction.user.id
@@ -51,7 +56,10 @@ class Alliance(commands.Cog):
         admin = self.c_settings.fetchone()
 
         if admin is None:
-            await interaction.response.send_message("You do not have permission to view alliances.", ephemeral=True)
+            await interaction.response.send_message(
+                "You do not have permission to view alliances.",
+                ephemeral=ephemeral
+            )
             return
 
         is_initial = admin[1]
@@ -667,8 +675,12 @@ class Alliance(commands.Cog):
                 )
 
     async def add_alliance(self, interaction: discord.Interaction):
+        ephemeral = interaction.guild is not None
         if interaction.guild is None:
-            await interaction.response.send_message("Please perform this action in a Discord channel.", ephemeral=True)
+            await interaction.response.send_message(
+                "Please perform this action in a Discord channel.",
+                ephemeral=ephemeral
+            )
             return
 
         modal = AllianceModal(title="Add Alliance")
@@ -767,6 +779,14 @@ class Alliance(commands.Cog):
             await modal.interaction.response.send_message(embed=error_embed, ephemeral=True)
 
     async def edit_alliance(self, interaction: discord.Interaction):
+        ephemeral = interaction.guild is not None
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "Please perform this action in a Discord channel.",
+                ephemeral=ephemeral
+            )
+            return
+
         self.c.execute("""
             SELECT a.alliance_id, a.name, COALESCE(s.interval, 0) as interval, COALESCE(s.channel_id, 0) as channel_id 
             FROM alliance_list a 
@@ -1000,9 +1020,21 @@ class Alliance(commands.Cog):
         embed.set_footer(text="Use the dropdown menu below to select an alliance")
         embed.timestamp = discord.utils.utcnow()
         
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(
+            embed=embed,
+            view=view,
+            ephemeral=ephemeral
+        )
 
     async def delete_alliance(self, interaction: discord.Interaction):
+        ephemeral = interaction.guild is not None
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "Please perform this action in a Discord channel.",
+                ephemeral=ephemeral
+            )
+            return
+
         try:
             self.c.execute("SELECT alliance_id, name FROM alliance_list ORDER BY name")
             alliances = self.c.fetchall()
@@ -1013,7 +1045,10 @@ class Alliance(commands.Cog):
                     description="There are no alliances to delete.",
                     color=discord.Color.red()
                 )
-                await interaction.response.send_message(embed=no_alliance_embed, ephemeral=True)
+                await interaction.response.send_message(
+                    embed=no_alliance_embed,
+                    ephemeral=ephemeral
+                )
                 return
 
             alliance_members = {}
@@ -1052,7 +1087,11 @@ class Alliance(commands.Cog):
 
             view = PaginatedDeleteView(option_pages, self.alliance_delete_callback)
             
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await interaction.response.send_message(
+                embed=embed,
+                view=view,
+                ephemeral=ephemeral
+            )
 
         except Exception as e:
             print(f"Error in delete_alliance: {e}")
@@ -1061,9 +1100,13 @@ class Alliance(commands.Cog):
                 description="An error occurred while loading the delete menu.",
                 color=discord.Color.red()
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await interaction.response.send_message(
+                embed=error_embed,
+                ephemeral=ephemeral
+            )
 
     async def alliance_delete_callback(self, interaction: discord.Interaction):
+        ephemeral = interaction.guild is not None
         try:
             alliance_id = int(interaction.data["values"][0])
             
@@ -1071,7 +1114,10 @@ class Alliance(commands.Cog):
             alliance_data = self.c.fetchone()
             
             if not alliance_data:
-                await interaction.response.send_message("Alliance not found.", ephemeral=True)
+                await interaction.response.send_message(
+                    "Alliance not found.",
+                    ephemeral=ephemeral
+                )
                 return
             
             alliance_name = alliance_data[0]
