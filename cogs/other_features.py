@@ -17,7 +17,7 @@ class OtherFeatures(commands.Cog):
                     "🐻 **Bear Trap**\n"
                     "└ Time notification system\n"
                     "└ Not just for Bear! Use it for any event:\n"
-                    "   Bear - KE - Forst - CJ and everything else\n"
+                    "   Bear - KE - Frostfire - CJ and everything else\n"
                     "└ Add unlimited notifications\n\n"
                     "🆔 **ID Channel**\n"
                     "└ Create and manage ID channels\n"
