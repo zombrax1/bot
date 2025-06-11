@@ -654,6 +654,14 @@ class BearTrap(commands.Cog):
         return times
 
     async def show_bear_trap_menu(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            message = "❌ This command can only be used in a server channel."
+            try:
+                await interaction.response.send_message(message)
+            except discord.InteractionResponded:
+                await interaction.followup.send(message)
+            return
+
         try:
             times = self.get_world_times()
             time_display = "\n".join([
