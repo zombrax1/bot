@@ -14,7 +14,7 @@ class OtherFeatures(commands.Cog):
                     "This section was created according to users' requests:\n\n"
                     "**Available Operations**\n"
                     "━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "🐻 **Bear Trap**\n"
+                    "📣 **Notification System**\n"
                     "└ Time notification system\n"
                     "└ Not just for Bear! Use it for any event:\n"
                     "   Bear - KE - Frostfire - CJ and everything else\n"
@@ -53,8 +53,8 @@ class OtherFeaturesView(discord.ui.View):
         self.cog = cog
 
     @discord.ui.button(
-        label="Bear Trap",
-        emoji="🐻",
+        label="Notification System",
+        emoji="📣",
         style=discord.ButtonStyle.primary,
         custom_id="bear_trap",
         row=0
