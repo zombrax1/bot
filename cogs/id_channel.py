@@ -448,26 +448,42 @@ class IDChannelView(discord.ui.View):
             channels = []
             with sqlite3.connect('db/id_channel.sqlite') as db:
                 cursor = db.cursor()
-                cursor.execute("""
-                    SELECT channel_id, alliance_id, created_at, created_by
-                    FROM id_channels 
-                    WHERE guild_id = ?
-                """, (interaction.guild_id,))
-                id_channels = cursor.fetchall()
+                if interaction.guild is None:
+                    cursor.execute(
+                        "SELECT guild_id, channel_id, alliance_id, created_at, created_by FROM id_channels"
+                    )
+                    id_channels = cursor.fetchall()
+                else:
+                    cursor.execute(
+                        """
+                        SELECT guild_id, channel_id, alliance_id, created_at, created_by
+                        FROM id_channels
+                        WHERE guild_id = ?
+                        """,
+                        (interaction.guild_id,)
+                    )
+                    id_channels = cursor.fetchall()
 
             with sqlite3.connect('db/alliance.sqlite') as alliance_db:
                 alliance_cursor = alliance_db.cursor()
-                for channel_id, alliance_id, created_at, created_by in id_channels:
-                    alliance_cursor.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (alliance_id,))
+                for guild_id, channel_id, alliance_id, created_at, created_by in id_channels:
+                    alliance_cursor.execute(
+                        "SELECT name FROM alliance_list WHERE alliance_id = ?",
+                        (alliance_id,),
+                    )
                     alliance_name = alliance_cursor.fetchone()
                     if alliance_name:
-                        channels.append((channel_id, alliance_name[0], created_at, created_by))
+                        channels.append(
+                            (guild_id, channel_id, alliance_name[0], created_at, created_by)
+                        )
 
             if not channels:
-                await interaction.response.send_message(
-                    "❌ No active ID channels found in this server.",
-                    ephemeral=True
+                message = (
+                    "❌ No active ID channels found in this server."
+                    if interaction.guild
+                    else "❌ No active ID channels found."
                 )
+                await interaction.response.send_message(message, ephemeral=True)
                 return
 
             embed = discord.Embed(
@@ -475,26 +491,34 @@ class IDChannelView(discord.ui.View):
                 color=discord.Color.blue()
             )
 
-            for channel_id, alliance_name, created_at, created_by in channels:
-                channel = interaction.guild.get_channel(channel_id)
+            for guild_id, channel_id, alliance_name, created_at, created_by in channels:
+                guild = self.bot.get_guild(guild_id)
+                channel = guild.get_channel(channel_id) if guild else self.bot.get_channel(channel_id)
                 if channel:
                     creator = None
-                    try:
-                        creator = await interaction.guild.fetch_member(created_by)
-                    except:
+                    if guild:
+                        try:
+                            creator = await guild.fetch_member(created_by)
+                        except Exception:
+                            pass
+                    if not creator:
                         try:
                             creator = await interaction.client.fetch_user(created_by)
-                        except:
+                        except Exception:
                             pass
 
                     creator_text = creator.mention if creator else f"Unknown (ID: {created_by})"
-                    
+
+                    guild_name = guild.name if guild else "Unknown Server"
+
                     embed.add_field(
-                        name=f"#{channel.name}",
-                        value=f"**Alliance:** {alliance_name}\n"
-                              f"**Created At:** {created_at}\n"
-                              f"**Created By:** {creator_text}",
-                        inline=False
+                        name=f"#{channel.name} ({guild_name})",
+                        value=(
+                            f"**Alliance:** {alliance_name}\n"
+                            f"**Created At:** {created_at}\n"
+                            f"**Created By:** {creator_text}"
+                        ),
+                        inline=False,
                     )
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -514,6 +538,13 @@ class IDChannelView(discord.ui.View):
     )
     async def delete_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            if interaction.guild is None:
+                await interaction.response.send_message(
+                    "❌ This command must be used in a server, not in DMs.",
+                    ephemeral=True
+                )
+                return
+
             channels = []
             with sqlite3.connect('db/id_channel.sqlite') as db:
                 cursor = db.cursor()
@@ -632,6 +663,13 @@ class IDChannelView(discord.ui.View):
     )
     async def create_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            if interaction.guild is None:
+                await interaction.response.send_message(
+                    "❌ This command must be used in a server, not in DMs.",
+                    ephemeral=True
+                )
+                return
+
             with sqlite3.connect('db/alliance.sqlite') as alliance_db:
                 cursor = alliance_db.cursor()
                 cursor.execute("SELECT alliance_id, name FROM alliance_list")
