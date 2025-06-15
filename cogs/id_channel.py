@@ -388,8 +388,8 @@ class IDChannel(commands.Cog):
 
             if not is_admin:
                 await interaction.response.send_message(
-                    "❌ You don't have permission to use this feature.", 
-                    ephemeral=True
+                    "❌ You don't have permission to use this feature.",
+                    ephemeral=interaction.guild is not None
                 )
                 return
 
@@ -418,7 +418,7 @@ class IDChannel(commands.Cog):
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     "❌ An error occurred. Please try again.",
-                    ephemeral=True
+                    ephemeral=interaction.guild is not None
                 )
 
     async def start_channel_listener(self, channel_id: int, alliance_id: int):
@@ -483,7 +483,10 @@ class IDChannelView(discord.ui.View):
                     if interaction.guild
                     else "❌ No active ID channels found."
                 )
-                await interaction.response.send_message(message, ephemeral=True)
+                await interaction.response.send_message(
+                    message,
+                    ephemeral=interaction.guild is not None
+                )
                 return
 
             embed = discord.Embed(
@@ -521,12 +524,15 @@ class IDChannelView(discord.ui.View):
                         inline=False,
                     )
 
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(
+                embed=embed,
+                ephemeral=interaction.guild is not None
+            )
 
         except Exception as e:
             await interaction.response.send_message(
                 "❌ An error occurred. Please try again.",
-                ephemeral=True
+                ephemeral=interaction.guild is not None
             )
 
     @discord.ui.button(
@@ -539,44 +545,80 @@ class IDChannelView(discord.ui.View):
     async def delete_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             if interaction.guild is None:
-                await interaction.response.send_message(
-                    "❌ This command must be used in a server, not in DMs.",
-                    ephemeral=True
-                )
-                return
-
-            channels = []
-            with sqlite3.connect('db/id_channel.sqlite') as db:
-                cursor = db.cursor()
-                cursor.execute("SELECT channel_id, alliance_id FROM id_channels WHERE guild_id = ?", (interaction.guild_id,))
-                id_channels = cursor.fetchall()
-
-            with sqlite3.connect('db/alliance.sqlite') as alliance_db:
-                alliance_cursor = alliance_db.cursor()
-                for channel_id, alliance_id in id_channels:
-                    alliance_cursor.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (alliance_id,))
-                    alliance_name = alliance_cursor.fetchone()
-                    if alliance_name:
-                        channels.append((channel_id, alliance_name[0]))
-
-            if not channels:
-                await interaction.response.send_message(
-                    "❌ No active ID channels found in this server.",
-                    ephemeral=True
-                )
-                return
-
-            options = []
-            for channel_id, alliance_name in channels:
-                channel = interaction.guild.get_channel(channel_id)
-                if channel:
-                    options.append(
-                        discord.SelectOption(
-                            label=f"#{channel.name}",
-                            value=str(channel_id),
-                            description=f"Alliance: {alliance_name}"
-                        )
+                channels = []
+                with sqlite3.connect('db/id_channel.sqlite') as db:
+                    cursor = db.cursor()
+                    cursor.execute(
+                        "SELECT guild_id, channel_id, alliance_id FROM id_channels"
                     )
+                    id_channels = cursor.fetchall()
+
+                with sqlite3.connect('db/alliance.sqlite') as alliance_db:
+                    alliance_cursor = alliance_db.cursor()
+                    for guild_id, channel_id, alliance_id in id_channels:
+                        guild = self.cog.bot.get_guild(guild_id)
+                        channel = guild.get_channel(channel_id) if guild else None
+                        if channel:
+                            alliance_cursor.execute(
+                                "SELECT name FROM alliance_list WHERE alliance_id = ?",
+                                (alliance_id,),
+                            )
+                            alliance_name = alliance_cursor.fetchone()
+                            alliance_name = alliance_name[0] if alliance_name else "Unknown"
+                            channels.append((guild_id, channel_id, channel.name, alliance_name))
+
+                if not channels:
+                    await interaction.response.send_message(
+                        "❌ No active ID channels found.",
+                    )
+                    return
+
+                options = [
+                    discord.SelectOption(
+                        label=f"#{name} ({self.cog.bot.get_guild(guild_id).name})",
+                        value=f"{guild_id}:{channel_id}",
+                        description=f"Alliance: {alliance}"
+                    )
+                    for guild_id, channel_id, name, alliance in channels
+                ]
+            else:
+                channels = []
+                with sqlite3.connect('db/id_channel.sqlite') as db:
+                    cursor = db.cursor()
+                    cursor.execute(
+                        "SELECT channel_id, alliance_id FROM id_channels WHERE guild_id = ?",
+                        (interaction.guild_id,),
+                    )
+                    id_channels = cursor.fetchall()
+
+                with sqlite3.connect('db/alliance.sqlite') as alliance_db:
+                    alliance_cursor = alliance_db.cursor()
+                    for channel_id, alliance_id in id_channels:
+                        alliance_cursor.execute(
+                            "SELECT name FROM alliance_list WHERE alliance_id = ?",
+                            (alliance_id,),
+                        )
+                        alliance_name = alliance_cursor.fetchone()
+                        if alliance_name:
+                            channel = interaction.guild.get_channel(channel_id)
+                            if channel:
+                                channels.append((channel_id, alliance_name[0], channel.name))
+
+                if not channels:
+                    await interaction.response.send_message(
+                        "❌ No active ID channels found in this server.",
+                        ephemeral=True,
+                    )
+                    return
+
+                options = [
+                    discord.SelectOption(
+                        label=f"#{name}",
+                        value=f"{interaction.guild_id}:{channel_id}",
+                        description=f"Alliance: {alliance_name}"
+                    )
+                    for channel_id, alliance_name, name in channels
+                ]
 
             class ChannelSelect(discord.ui.Select):
                 def __init__(self):
@@ -645,13 +687,13 @@ class IDChannelView(discord.ui.View):
             await interaction.response.send_message(
                 embed=select_embed,
                 view=view,
-                ephemeral=True
+                ephemeral=interaction.guild is not None
             )
 
         except Exception as e:
             await interaction.response.send_message(
                 "❌ An error occurred. Please try again.",
-                ephemeral=True
+                ephemeral=interaction.guild is not None
             )
 
     @discord.ui.button(
@@ -664,137 +706,169 @@ class IDChannelView(discord.ui.View):
     async def create_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             if interaction.guild is None:
-                await interaction.response.send_message(
-                    "❌ This command must be used in a server, not in DMs.",
-                    ephemeral=True
+                guilds = self.cog.bot.guilds
+                if not guilds:
+                    await interaction.response.send_message("❌ No servers available.")
+                    return
+
+                guild_options = [
+                    discord.SelectOption(label=g.name, value=str(g.id))
+                    for g in guilds[:25]
+                ]
+
+                class GuildSelect(discord.ui.Select):
+                    def __init__(self):
+                        super().__init__(placeholder="Select a server", options=guild_options, custom_id="guild_select")
+
+                    async def callback(self, guild_interaction: discord.Interaction):
+                        guild_id = int(self.values[0])
+                        guild = self.view.cog.bot.get_guild(guild_id)
+                        await self.view.cog.start_create_channel_flow(guild_interaction, guild, ephemeral=False)
+
+                view = discord.ui.View()
+                view.cog = self.cog
+                view.add_item(GuildSelect())
+
+                select_embed = discord.Embed(
+                    title="🔧 ID Channel Setup",
+                    description="Select the server for the ID channel:",
+                    color=discord.Color.blue()
                 )
-                return
 
-            with sqlite3.connect('db/alliance.sqlite') as alliance_db:
-                cursor = alliance_db.cursor()
-                cursor.execute("SELECT alliance_id, name FROM alliance_list")
-                alliances = cursor.fetchall()
-
-            if not alliances:
-                await interaction.response.send_message(
-                    "❌ No alliances found.", 
-                    ephemeral=True
-                )
-                return
-
-            options = [
-                discord.SelectOption(
-                    label=name,
-                    value=str(alliance_id),
-                    description=f"Alliance ID: {alliance_id}"
-                ) for alliance_id, name in alliances
-            ]
-
-            class AllianceSelect(discord.ui.Select):
-                def __init__(self):
-                    super().__init__(
-                        placeholder="Select an alliance",
-                        options=options,
-                        custom_id="alliance_select"
-                    )
-
-                async def callback(self, select_interaction: discord.Interaction):
-                    alliance_id = int(self.values[0])
-                    
-                    class ChannelSelect(discord.ui.ChannelSelect):
-                        def __init__(self):
-                            super().__init__(
-                                placeholder="Select a channel to use as ID channel",
-                                channel_types=[discord.ChannelType.text]
-                            )
-
-                        async def callback(self, channel_interaction: discord.Interaction):
-                            selected_channel = self.values[0]
-                            
-                            try:
-                                with sqlite3.connect('db/id_channel.sqlite') as db:
-                                    cursor = db.cursor()
-                                    cursor.execute("""
-                                        INSERT INTO id_channels 
-                                        (guild_id, alliance_id, channel_id, created_at, created_by)
-                                        VALUES (?, ?, ?, ?, ?)
-                                    """, (
-                                        channel_interaction.guild_id,
-                                        alliance_id,
-                                        selected_channel.id,
-                                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                        channel_interaction.user.id
-                                    ))
-                                    db.commit()
-
-                                await self.view.cog.start_channel_listener(selected_channel.id, alliance_id)
-
-                                await self.view.cog.log_action(
-                                    "CREATE_CHANNEL",
-                                    channel_interaction.user.id,
-                                    channel_interaction.guild_id,
-                                    {
-                                        "alliance_id": alliance_id,
-                                        "channel_id": selected_channel.id,
-                                        "channel_name": selected_channel.name
-                                    }
-                                )
-
-                                success_embed = discord.Embed(
-                                    title="✅ ID Channel Created",
-                                    description=f"**Channel:** {selected_channel.mention}\n"
-                                              f"**Alliance:** {dict(alliances)[alliance_id]}\n\n"
-                                              f"This channel will now automatically check and add FIDs to the alliance.",
-                                    color=discord.Color.green()
-                                )
-                                await channel_interaction.response.edit_message(embed=success_embed, view=None)
-
-                            except sqlite3.IntegrityError:
-                                error_embed = discord.Embed(
-                                    title="❌ Error",
-                                    description="This channel is already being used as an ID channel!",
-                                    color=discord.Color.red()
-                                )
-                                await channel_interaction.response.edit_message(embed=error_embed, view=None)
-                            except Exception as e:
-                                error_embed = discord.Embed(
-                                    title="❌ Error",
-                                    description="An error occurred while creating the channel.",
-                                    color=discord.Color.red()
-                                )
-                                await channel_interaction.response.edit_message(embed=error_embed, view=None)
-
-                    channel_view = discord.ui.View()
-                    channel_view.cog = self.view.cog
-                    channel_view.add_item(ChannelSelect())
-                    
-                    select_embed = discord.Embed(
-                        title="🔧 ID Channel Setup",
-                        description="Select a channel to use as ID channel:",
-                        color=discord.Color.blue()
-                    )
-                    await select_interaction.response.edit_message(embed=select_embed, view=channel_view)
-
-            alliance_view = discord.ui.View()
-            alliance_view.cog = self.cog
-            alliance_view.add_item(AllianceSelect())
-            
-            initial_embed = discord.Embed(
-                title="🔧 ID Channel Setup",
-                description="Select an alliance for the ID channel:",
-                color=discord.Color.blue()
-            )
-            await interaction.response.send_message(
-                embed=initial_embed,
-                view=alliance_view,
-                ephemeral=True
-            )
+                await interaction.response.send_message(embed=select_embed, view=view)
+            else:
+                await self.start_create_channel_flow(interaction, interaction.guild, ephemeral=True)
 
         except Exception as e:
             await interaction.response.send_message(
                 "❌ An error occurred. Please try again.",
-                ephemeral=True
+                ephemeral=interaction.guild is not None
             )
+
+    async def start_create_channel_flow(self, interaction: discord.Interaction, guild: discord.Guild, ephemeral: bool):
+        with sqlite3.connect('db/alliance.sqlite') as alliance_db:
+            cursor = alliance_db.cursor()
+            cursor.execute("SELECT alliance_id, name FROM alliance_list")
+            alliances = cursor.fetchall()
+
+        if not alliances:
+            await interaction.response.send_message(
+                "❌ No alliances found.",
+                ephemeral=ephemeral
+            )
+            return
+
+        alliances_dict = dict(alliances)
+        alliance_options = [
+            discord.SelectOption(
+                label=name,
+                value=str(alliance_id),
+                description=f"Alliance ID: {alliance_id}"
+            ) for alliance_id, name in alliances
+        ]
+
+        class AllianceSelect(discord.ui.Select):
+            def __init__(self):
+                super().__init__(placeholder="Select an alliance", options=alliance_options, custom_id="alliance_select")
+
+            async def callback(self, select_interaction: discord.Interaction):
+                alliance_id = int(self.values[0])
+
+                channel_options = [
+                    discord.SelectOption(label=f"#{ch.name}", value=str(ch.id))
+                    for ch in guild.text_channels[:25]
+                ]
+
+                class ChannelSelect(discord.ui.Select):
+                    def __init__(self):
+                        super().__init__(
+                            placeholder="Select a channel to use as ID channel",
+                            options=channel_options,
+                            custom_id="channel_select"
+                        )
+
+                    async def callback(self, channel_interaction: discord.Interaction):
+                        channel_id = int(self.values[0])
+                        channel = guild.get_channel(channel_id)
+                        try:
+                            with sqlite3.connect('db/id_channel.sqlite') as db:
+                                cursor = db.cursor()
+                                cursor.execute(
+                                    """
+                                    INSERT INTO id_channels
+                                    (guild_id, alliance_id, channel_id, created_at, created_by)
+                                    VALUES (?, ?, ?, ?, ?)
+                                    """,
+                                    (
+                                        guild.id,
+                                        alliance_id,
+                                        channel_id,
+                                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                        channel_interaction.user.id,
+                                    ),
+                                )
+                                db.commit()
+
+                            await self.view.cog.start_channel_listener(channel_id, alliance_id)
+
+                            await self.view.cog.log_action(
+                                "CREATE_CHANNEL",
+                                channel_interaction.user.id,
+                                guild.id,
+                                {
+                                    "alliance_id": alliance_id,
+                                    "channel_id": channel_id,
+                                    "channel_name": channel.name if channel else "Unknown",
+                                },
+                            )
+
+                            success_embed = discord.Embed(
+                                title="✅ ID Channel Created",
+                                description=(
+                                    f"**Channel:** {channel.mention if channel else '#Unknown'}\n"
+                                    f"**Alliance:** {alliances_dict.get(alliance_id, alliance_id)}\n\n"
+                                    "This channel will now automatically check and add FIDs to the alliance."
+                                ),
+                                color=discord.Color.green(),
+                            )
+                            await channel_interaction.response.edit_message(embed=success_embed, view=None)
+
+                        except sqlite3.IntegrityError:
+                            error_embed = discord.Embed(
+                                title="❌ Error",
+                                description="This channel is already being used as an ID channel!",
+                                color=discord.Color.red(),
+                            )
+                            await channel_interaction.response.edit_message(embed=error_embed, view=None)
+                        except Exception as e:
+                            error_embed = discord.Embed(
+                                title="❌ Error",
+                                description="An error occurred while creating the channel.",
+                                color=discord.Color.red(),
+                            )
+                            await channel_interaction.response.edit_message(embed=error_embed, view=None)
+
+                channel_view = discord.ui.View()
+                channel_view.cog = self.view.cog
+                channel_view.add_item(ChannelSelect())
+
+                select_embed = discord.Embed(
+                    title="🔧 ID Channel Setup",
+                    description="Select a channel to use as ID channel:",
+                    color=discord.Color.blue(),
+                )
+                await select_interaction.response.edit_message(embed=select_embed, view=channel_view)
+
+        alliance_view = discord.ui.View()
+        alliance_view.cog = self.cog
+        alliance_view.add_item(AllianceSelect())
+
+        initial_embed = discord.Embed(
+            title="🔧 ID Channel Setup",
+            description="Select an alliance for the ID channel:",
+            color=discord.Color.blue(),
+        )
+        await interaction.response.send_message(embed=initial_embed, view=alliance_view, ephemeral=ephemeral)
 
     @discord.ui.button(
         label="Back",
@@ -811,12 +885,12 @@ class IDChannelView(discord.ui.View):
             else:
                 await interaction.response.send_message(
                     "❌ Other Features module not found.",
-                    ephemeral=True
+                    ephemeral=interaction.guild is not None
                 )
         except Exception as e:
             await interaction.response.send_message(
                 "❌ An error occurred while returning to Other Features menu.",
-                ephemeral=True
+                ephemeral=interaction.guild is not None
             )
 
 async def setup(bot):
