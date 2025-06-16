@@ -630,8 +630,10 @@ class IDChannelView(discord.ui.View):
 
                 async def callback(self, select_interaction: discord.Interaction):
                     try:
-                        channel_id = int(self.values[0])
-                        
+                        guild_id_str, channel_id_str = self.values[0].split(":")
+                        guild_id = int(guild_id_str)
+                        channel_id = int(channel_id_str)
+
                         await self.view.cog.stop_channel_listener(channel_id)
 
                         with sqlite3.connect('db/id_channel.sqlite') as db:
@@ -639,12 +641,13 @@ class IDChannelView(discord.ui.View):
                             cursor.execute("DELETE FROM id_channels WHERE channel_id = ?", (channel_id,))
                             db.commit()
 
-                        channel = select_interaction.guild.get_channel(channel_id)
-                        
+                        guild = self.view.cog.bot.get_guild(guild_id)
+                        channel = guild.get_channel(channel_id) if guild else None
+
                         await self.view.cog.log_action(
                             "DELETE_CHANNEL",
                             select_interaction.user.id,
-                            select_interaction.guild_id,
+                            guild_id,
                             {
                                 "channel_id": channel_id,
                                 "channel_name": channel.name if channel else "Unknown"
