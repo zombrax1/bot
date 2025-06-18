@@ -137,10 +137,11 @@ class AllianceMemberOperations(commands.Cog):
         embed.set_footer(text="Select an option to continue")
 
         class MemberOperationsView(discord.ui.View):
-            def __init__(self, cog):
+            def __init__(self, cog, target_guild_id: int):
                 super().__init__()
                 self.cog = cog
                 self.bot = cog.bot
+                self.target_guild_id = target_guild_id # Store target_guild_id
 
             @discord.ui.button(
                 label="Add Member",
@@ -172,7 +173,7 @@ class AllianceMemberOperations(commands.Cog):
 
                     alliances, special_alliances, is_global = await self.cog.get_admin_alliances(
                         button_interaction.user.id, 
-                        button_interaction.guild_id
+                        self.target_guild_id # Use stored target_guild_id
                     )
                     
                     if not alliances:
@@ -689,7 +690,7 @@ class AllianceMemberOperations(commands.Cog):
                 row=2
             )
             async def main_menu_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                await self.cog.show_main_menu(interaction)
+                await self.cog.show_main_menu(interaction, guild_id_for_view=self.target_guild_id) # Pass target_guild_id
 
             @discord.ui.button(label="Transfer Member", emoji="🔄", style=discord.ButtonStyle.primary)
             async def transfer_member_button(self, button_interaction: discord.Interaction, button: discord.ui.Button):
@@ -712,7 +713,7 @@ class AllianceMemberOperations(commands.Cog):
                     
                     alliances, special_alliances, is_global = await self.cog.get_admin_alliances(
                         button_interaction.user.id, 
-                        button_interaction.guild_id
+                        self.target_guild_id # Use stored target_guild_id
                     )
                     
                     if not alliances:
@@ -757,7 +758,7 @@ class AllianceMemberOperations(commands.Cog):
                             alliances_with_counts.append((alliance_id, name, member_count))
 
                     
-                    view = AllianceSelectView(alliances_with_counts, self.cog)
+                    view = AllianceSelectView(alliances_with_counts, self.cog) # AllianceSelectView might also need target_guild_id if it calls get_admin_alliances
                     
                     async def source_callback(interaction: discord.Interaction):
                         try:
@@ -813,7 +814,7 @@ class AllianceMemberOperations(commands.Cog):
                             )
 
                             
-                            member_view = MemberSelectView(members, source_alliance_name, self.cog)
+                            member_view = MemberSelectView(members, source_alliance_name, self.cog) # MemberSelectView might also need context
                             
                             async def member_callback(member_interaction: discord.Interaction):
                                 selected_fid = int(member_view.current_select.values[0])
@@ -935,7 +936,7 @@ class AllianceMemberOperations(commands.Cog):
                     )
 
 
-        view = MemberOperationsView(self)
+        view = MemberOperationsView(self, target_guild_id=target_guild.id) # Pass target_guild.id here
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def add_member(self, interaction: discord.Interaction):
