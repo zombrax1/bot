@@ -1028,13 +1028,8 @@ class BotOperations(commands.Cog):
         except:
             pass
 
-    # @commands.Cog.listener() # Comment out or remove if no other component interactions
-    # async def on_interaction(self, interaction: discord.Interaction):
-    #     if not interaction.type == discord.InteractionType.component:
-    #         return
-    #     # Remove all the logic for custom_ids now handled by BotOperationsView
-    #     # Keep only logic for other components if any, otherwise remove method.
-
+    # The on_interaction listener is removed as its functionality is now handled by
+    # the button callbacks in BotOperationsView, which directly call the respective handler methods.
 
     async def show_bot_operations_menu(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
         embed_description = (
@@ -1075,14 +1070,25 @@ class BotOperations(commands.Cog):
             await interaction.response.edit_message(embed=embed, view=view)
         # Simplified error handling for the subtask, assuming the primary goal is view replacement.
         # A more robust error handling would go here.
-        # except Exception as e:
-        #     if not any(error_code in str(e) for error_code in ["10062", "40060"]):
-                print(f"Show bot operations menu error: {e}")
+        except Exception as e:
+            if not any(error_code in str(e) for error_code in ["10062", "40060"]): # Check for specific non-critical errors
+                print(f"Show bot operations menu error: {e}") # Correctly indented
+
+            # Correctly indented error response logic
             if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    "❌ An error occurred while showing the menu.",
-                    ephemeral=True
-                )
+                try:
+                    await interaction.response.send_message(
+                        "❌ An error occurred while showing the menu.",
+                        ephemeral=True
+                    )
+                except discord.errors.InteractionResponded: # In case of race condition
+                    await interaction.followup.send("❌ An error occurred while showing the menu.", ephemeral=True)
+            else:
+                # If already responded, try to followup. This might happen if a defer() was used earlier.
+                try:
+                    await interaction.followup.send("❌ An error occurred while showing the menu.", ephemeral=True)
+                except discord.errors.HTTPException:
+                    pass # If followup also fails, nothing much can be done
 
     async def confirm_permission_removal(self, admin_id: int, alliance_id: int, confirm_interaction: discord.Interaction):
         try:

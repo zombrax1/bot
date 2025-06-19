@@ -315,14 +315,11 @@ class Alliance(commands.Cog):
             elif custom_id == "gift_code_operations":
                 gift_ops_cog = self.bot.get_cog("GiftOperations")
                 if gift_ops_cog:
-                    # Assuming show_gift_menu can use target_guild if passed or ignore if not
-                    await gift_ops_cog.show_gift_menu(interaction, guild_id=guild_id)
+                    # target_guild is determined at the start of on_interaction
+                    await gift_ops_cog.show_gift_menu(interaction, target_guild=target_guild)
                 else:
-                    ack_message = "Gift Operations cog not found."
-                    if interaction.response.is_done():
-                        await interaction.followup.send(ack_message, ephemeral=True)
-                    else:
-                        await interaction.response.edit_message(content=ack_message, embed=None, view=None)
+                    # Using edit_message as this is part of a component interaction response flow
+                    await interaction.response.edit_message(content="GiftOperations cog not found.", embed=None, view=None)
 
             elif custom_id == "alliance_history":
                 changes_cog = self.bot.get_cog("Changes")
@@ -750,66 +747,79 @@ class Alliance(commands.Cog):
                 await modal.wait()
 
                 if not modal.interaction: # Modal timed out
+                    # Follow up on the select_interaction as modal.interaction is not available.
+                    if not select_interaction.response.is_done():
+                        # This condition implies send_modal itself failed or was not called.
+                        # Responding to select_interaction.
+                        await select_interaction.response.edit_message(content="Alliance edit modal timed out or failed to load.", view=None, embed=None)
+                    else:
+                        await select_interaction.followup.send("Alliance edit modal timed out.", ephemeral=True)
                     return
 
-                # Modal submitted, now get values
-                new_alliance_name = modal.name.value.strip()
-                new_interval = int(modal.interval.value.strip()) # Can raise ValueError
+                try: # This is the try block that needs the generic except
+                    new_alliance_name = modal.name.value.strip()
+                    new_interval = int(modal.interval.value.strip()) # Can raise ValueError
 
-                # Now prompt for channel selection using PaginatedChannelView
-                # The target_guild for channel listing comes from the modal instance
-                if not modal.target_guild: # Should not happen if modal was instantiated correctly
-                     await modal.interaction.response.send_message("Error: Guild context lost for channel selection.", ephemeral=True)
-                     return
+                    # Now prompt for channel selection using PaginatedChannelView
+                    # The target_guild for channel listing comes from the modal instance
+                    if not modal.target_guild: # Should not happen if modal was instantiated correctly
+                         await modal.interaction.response.send_message("Error: Guild context lost for channel selection.", ephemeral=True)
+                         return
 
-                channel_selection_embed = discord.Embed(
-                    title="🔄 Select New Channel for Alliance",
-                    description=(
-                        f"**Alliance:** {new_alliance_name}\n"
-                        f"**Current Channel:** {f'<#{current_settings_data[1]}>' if current_settings_data and current_settings_data[1] else 'Not set'}\n"
-                        "Please select the new channel for this alliance.\n"
-                        f"**Server:** {modal.target_guild.name}"
-                    ),
-                    color=discord.Color.blue()
-                )
-
-                async def wrapped_edit_alliance_channel_select_callback(channel_select_interaction: discord.Interaction):
-                    await self.edit_alliance_channel_select_callback(
-                        channel_select_interaction,
-                        selected_alliance_id, # The ID of the alliance being edited
-                        new_alliance_name,
-                        new_interval,
-                        current_settings_data # Pass the original settings to know if it's an UPDATE or INSERT
+                    channel_selection_embed = discord.Embed(
+                        title="🔄 Select New Channel for Alliance",
+                        description=(
+                            f"**Alliance:** {new_alliance_name}\n"
+                            f"**Current Channel:** {f'<#{current_settings_data[1]}>' if current_settings_data and current_settings_data[1] else 'Not set'}\n"
+                            "Please select the new channel for this alliance.\n"
+                            f"**Server:** {modal.target_guild.name}"
+                        ),
+                        color=discord.Color.blue()
                     )
 
-                guild_channels = modal.target_guild.text_channels
-                if not guild_channels:
-                    await modal.interaction.response.send_message("This server has no text channels to select.", ephemeral=True)
-                    return
+                    async def wrapped_edit_alliance_channel_select_callback(channel_select_interaction: discord.Interaction):
+                        await self.edit_alliance_channel_select_callback(
+                            channel_select_interaction,
+                            selected_alliance_id, # The ID of the alliance being edited
+                            new_alliance_name,
+                            new_interval,
+                            current_settings_data # Pass the original settings to know if it's an UPDATE or INSERT
+                        )
 
-                channel_view = PaginatedChannelView(guild_channels, wrapped_edit_alliance_channel_select_callback)
+                    guild_channels = modal.target_guild.text_channels
+                    if not guild_channels:
+                        await modal.interaction.response.send_message("This server has no text channels to select.", ephemeral=True)
+                        return
 
-                if modal.interaction.response.is_done():
-                    await modal.interaction.followup.send(embed=channel_selection_embed, view=channel_view, ephemeral=True)
-                else:
-                    await modal.interaction.response.send_message(embed=channel_selection_embed, view=channel_view, ephemeral=True)
+                    channel_view = PaginatedChannelView(guild_channels, wrapped_edit_alliance_channel_select_callback)
 
-            except ValueError: # For int(modal.interval.value.strip())
-                error_msg = "Invalid interval value. Please enter a number."
-                if modal.interaction and not modal.interaction.response.is_done():
-                    await modal.interaction.response.send_message(error_msg, ephemeral=True)
-                elif modal.interaction:
-                    await modal.interaction.followup.send(error_msg, ephemeral=True)
+                    if modal.interaction.response.is_done(): # Should not be done if modal was just submitted.
+                        await modal.interaction.followup.send(embed=channel_selection_embed, view=channel_view, ephemeral=True)
+                    else:
+                        await modal.interaction.response.send_message(embed=channel_selection_embed, view=channel_view, ephemeral=True)
+
+                except ValueError: # For int(modal.interval.value.strip())
+                    error_msg = "Invalid interval value. Please enter a number."
+                    # Respond to the modal's interaction
+                    if not modal.interaction.response.is_done():
+                        await modal.interaction.response.send_message(error_msg, ephemeral=True)
+                    else: # Should ideally not happen if modal was just submitted
+                        await modal.interaction.followup.send(error_msg, ephemeral=True)
+                except Exception as e: # Catch any other error during modal processing
+                    error_msg = f"An unexpected error occurred while processing the edit: {e}"
+                    print(f"Error in edit_alliance modal processing (after submit): {e}") # Logging
+                    if not modal.interaction.response.is_done():
+                        await modal.interaction.response.send_message(error_msg, ephemeral=True)
+                    else:
+                        await modal.interaction.followup.send(error_msg, ephemeral=True)
+            # This except block is for the outer try in select_alliance_to_edit_callback
+            # It catches errors before or after the modal, or if send_modal fails.
             except Exception as e:
                 error_msg = f"Error during alliance edit process: {str(e)}"
-                print(f"Edit alliance error: {e}")
-                if modal.interaction and not modal.interaction.response.is_done():
-                    await modal.interaction.response.send_message(error_msg, ephemeral=True)
-                elif modal.interaction:
-                    await modal.interaction.followup.send(error_msg, ephemeral=True)
-                # If modal.interaction is None (e.g. select_interaction failed before modal), try original interaction
-                elif not select_interaction.response.is_done():
-                     await select_interaction.response.send_message(error_msg, ephemeral=True)
+                print(f"Edit alliance error (in select_alliance_to_edit_callback): {e}")
+                # Try to respond to select_interaction as it's the one that triggered this callback
+                if not select_interaction.response.is_done():
+                     await select_interaction.response.edit_message(content=error_msg, embed=None, view=None) # Edit original message
                 else:
                      await select_interaction.followup.send(error_msg, ephemeral=True)
 

@@ -63,7 +63,9 @@ class OtherFeaturesView(discord.ui.View):
         try:
             bear_trap_cog = self.cog.bot.get_cog("BearTrap")
             if bear_trap_cog:
-                await bear_trap_cog.show_bear_trap_menu(interaction)
+                # Pass interaction.guild, which might be None if interaction is from DM
+                # show_bear_trap_menu (if refactored) would handle this
+                await bear_trap_cog.show_bear_trap_menu(interaction, target_guild=interaction.guild)
             else:
                 await interaction.response.send_message(
                     "❌ Bear Trap module not found.",
@@ -87,7 +89,9 @@ class OtherFeaturesView(discord.ui.View):
         try:
             id_channel_cog = self.cog.bot.get_cog("IDChannel")
             if id_channel_cog:
-                await id_channel_cog.show_id_channel_menu(interaction)
+                # Pass interaction.guild, which might be None if interaction is from DM
+                # show_id_channel_menu (if refactored) would handle this
+                await id_channel_cog.show_id_channel_menu(interaction, target_guild=interaction.guild)
             else:
                 await interaction.response.send_message(
                     "❌ ID Channel module not found.",

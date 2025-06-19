@@ -18,10 +18,61 @@ import time
 import random
 import logging
 import logging.handlers
-from .alliance_member_operations import AllianceSelectView
-from .alliance import PaginatedChannelView
+from typing import Optional # Added
+# discord should be present (it is: import discord)
+from .alliance_member_operations import AllianceSelectView # Path seems okay
+from .alliance import PaginatedChannelView # Path seems okay
+from .utils.guild_select import prompt_guild_selection # Added
 from .gift_operationsapi import GiftCodeAPI
 from .gift_captchasolver import GiftCaptchaSolver
+
+class GiftView(discord.ui.View):
+    def __init__(self, cog, target_guild: Optional[discord.Guild], timeout=180):
+        super().__init__(timeout=timeout)
+        self.cog = cog # Instance of GiftOperations cog
+        self.target_guild = target_guild # Can be None
+        # Buttons are now defined below using decorators
+
+    @discord.ui.button(label="Create Gift Code", emoji="🎫", custom_id="gift_create_code", row=0)
+    async def create_gift_code_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.create_gift_code_handler(interaction, self.target_guild)
+
+    @discord.ui.button(label="CAPTCHA Settings", emoji="🔍", custom_id="gift_captcha_settings", row=0)
+    async def captcha_settings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.show_ocr_settings_handler(interaction, self.target_guild)
+
+    @discord.ui.button(label="List Gift Codes", emoji="📋", custom_id="gift_list_codes", row=0)
+    async def list_gift_codes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.list_gift_codes_handler(interaction)
+
+    @discord.ui.button(label="Auto Gift Settings", emoji="⚙️", custom_id="gift_auto_settings", row=1)
+    async def auto_gift_settings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.setup_giftcode_auto_handler(interaction, self.target_guild)
+
+    @discord.ui.button(label="Delete Gift Code", emoji="❌", custom_id="gift_delete_code", row=1)
+    async def delete_gift_code_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.delete_gift_code_handler(interaction)
+
+    @discord.ui.button(label="Gift Code Channel", emoji="📢", custom_id="gift_gift_channel", row=1)
+    async def gift_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.setup_gift_channel_handler(interaction, self.target_guild)
+
+    @discord.ui.button(label="Delete Gift Channel", emoji="🗑️", custom_id="gift_delete_gift_channel", row=2)
+    async def delete_gift_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.delete_gift_channel_handler(interaction, self.target_guild)
+
+    @discord.ui.button(label="Use Gift Code for Alliance", emoji="🎯", custom_id="gift_use_for_alliance", row=2)
+    async def use_gift_alliance_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.use_gift_for_alliance_handler(interaction, self.target_guild)
+
+    @discord.ui.button(label="Main Menu", emoji="🏠", style=discord.ButtonStyle.secondary, custom_id="gift_main_menu", row=3)
+    async def main_menu_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        alliance_cog = self.cog.bot.get_cog("Alliance")
+        if alliance_cog and hasattr(alliance_cog, 'show_main_menu'):
+            guild_id = self.target_guild.id if self.target_guild else None
+            await alliance_cog.show_main_menu(interaction, guild_id_for_view=guild_id)
+        else:
+            await interaction.response.edit_message(content="Alliance cog not found.", embed=None, view=None)
 
 class GiftOperations(commands.Cog):
     def __init__(self, bot):
@@ -351,6 +402,14 @@ class GiftOperations(commands.Cog):
             self.logger.exception(f"DATABASE ERROR during on_ready setup: {db_err}")
         except Exception as e:
             self.logger.exception(f"UNEXPECTED ERROR during on_ready setup: {e}")
+
+    # @discord.ext.commands.Cog.listener()
+    # async def on_interaction(self, interaction: discord.Interaction):
+    #     # This listener is being replaced by direct callbacks in GiftView to new handler methods.
+    #     # If there were other types of component interactions handled here, they would need
+    #     # to be preserved or moved to their own views/handlers.
+    #     # For the gift operations menu, this is no longer needed.
+    #     pass
 
     @discord.ext.commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -1634,41 +1693,48 @@ class GiftOperations(commands.Cog):
             ephemeral=True
         )
 
-    async def show_gift_menu(self, interaction: discord.Interaction):
+    async def show_gift_menu(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild] = None):
+        # Admin check should be performed here or before calling this method
+        # For now, assume admin check is handled by the calling context (e.g., Alliance cog's on_interaction)
+
+        gift_menu_embed_description = (
+            "Please select an operation:\n\n"
+            "**Available Operations**\n"
+            "🎫 **Create Gift Code**\n"
+            "└ Input a new gift code\n\n"
+            "🔍 **CAPTCHA Settings**\n"
+            "└ Configure OCR and image saving options\n\n"
+            "📋 **List Gift Codes**\n"
+            "└ View all active, valid codes\n\n"
+            "❌ **Delete Gift Code**\n"
+            "└ Remove existing codes\n\n"
+            "📢 **Gift Code Channel**\n"
+            "└ Set the channel to monitor for gift codes\n\n"
+            "⚙️ **Auto Gift Settings**\n"
+            "└ Configure automatic gift code usage\n\n"
+            "🗑️ **Delete Gift Channel**\n"
+            "└ Clear the configured gift code channel\n\n"
+            "🎯 **Use Gift Code for Alliance**\n"
+            "└ Redeem a gift code for one or more alliances\n"
+            "━━━━━━━━━━━━━━━━━━━━━━"
+        )
         gift_menu_embed = discord.Embed(
             title="🎁 Gift Code Operations",
-            description=(
-                "Please select an operation:\n\n"
-                "**Available Operations**\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🎫 **Create Gift Code**\n"
-                "└ Input a new gift code\n\n"
-                "🔍 **CAPTCHA Settings**\n"
-                "└ Configure OCR and image saving options\n\n"
-                "📋 **List Gift Codes**\n"
-                "└ View all active, valid codes\n\n"
-                "❌ **Delete Gift Code**\n"
-                "└ Remove existing codes\n\n"
-                "📢 **Gift Code Channel**\n"
-                "└ Set the channel to monitor for gift codes\n\n"
-                "⚙️ **Auto Gift Settings**\n"
-                "└ Configure automatic gift code usage\n\n"
-                "🗑️ **Delete Gift Channel**\n"
-                "└ Clear the configured gift code channel\n\n"
-                "🎯 **Use Gift Code for Alliance**\n"
-                "└ Redeem a gift code for one or more alliances\n"
-                "━━━━━━━━━━━━━━━━━━━━━━"
-            ),
+            description=gift_menu_embed_description.replace('\n','\n'), # Keep existing replace for now
             color=discord.Color.gold()
         )
 
-        view = GiftView(self)
-        try:
+        view = GiftView(self, target_guild=target_guild) # Pass self and target_guild
+
+        # This method is called from cogs/alliance.py on_interaction,
+        # which is an edit_message context for a component interaction.
+        if interaction.response.is_done():
+            # If the interaction was deferred or already responded to by prompt_guild_selection
+            await interaction.edit_original_response(embed=gift_menu_embed, view=view)
+        else:
+            # This case is less likely if called from Alliance cog's on_interaction button for sub-menu
             await interaction.response.edit_message(embed=gift_menu_embed, view=view)
-        except discord.InteractionResponded:
-            pass
-        except Exception:
-            pass
+
 
     async def create_gift_code(self, interaction: discord.Interaction):
         self.settings_cursor.execute("SELECT 1 FROM admin WHERE id = ?", (interaction.user.id,))
@@ -2295,7 +2361,7 @@ class GiftOperations(commands.Cog):
             ephemeral=True
         )
 
-    async def use_giftcode_for_alliance(self, alliance_id, giftcode):
+    async def use_giftcode_for_alliance(self, alliance_id, giftcode): # This is an existing complex method, will be called by handler
         MEMBER_PROCESS_DELAY = 1.0
         API_RATE_LIMIT_COOLDOWN = 60.0
         CAPTCHA_CYCLE_COOLDOWN = 60.0
@@ -3594,4 +3660,225 @@ class OCRSettingsView(discord.ui.View):
             await progress_message.edit(content=f"❌ {message_from_task}")
 
 async def setup(bot):
-    await bot.add_cog(GiftOperations(bot)) 
+    await bot.add_cog(GiftOperations(bot))
+
+    # New Handler Methods (Stubs or calling existing logic)
+    async def create_gift_code_handler(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
+        # This was originally self.create_gift_code(interaction)
+        # CreateGiftCodeModal does not take target_guild
+        modal = CreateGiftCodeModal(self)
+        await interaction.response.send_modal(modal)
+
+    async def show_ocr_settings_handler(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
+        # This was self.show_ocr_settings(interaction)
+        await self.show_ocr_settings(interaction)
+
+    async def list_gift_codes_handler(self, interaction: discord.Interaction):
+        # This was self.list_gift_codes(interaction)
+        await self.list_gift_codes(interaction)
+
+    async def setup_giftcode_auto_handler(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
+        # This was self.setup_giftcode_auto(interaction)
+        # This method will need internal refactoring to use target_guild for non-global admins.
+        # For now, just call it. It should handle its own responses.
+        await self.setup_giftcode_auto(interaction)
+
+    async def delete_gift_code_handler(self, interaction: discord.Interaction):
+        # This was self.delete_gift_code(interaction)
+        await self.delete_gift_code(interaction)
+
+    async def setup_gift_channel_handler(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
+        current_guild = target_guild
+        # If called from a context where target_guild might be None (e.g., future direct command in DMs)
+        if not current_guild and interaction.guild is None:
+            if not interaction.response.is_done(): # Defer only if not already done
+                await interaction.response.defer(ephemeral=True)
+            current_guild = await prompt_guild_selection(interaction, self.bot, interaction.user.id, "Gift Code Channel Setup")
+            if not current_guild:
+                # prompt_guild_selection should have sent a message if it returned None (e.g., timeout/cancel)
+                # If not interaction.response.is_done() was false, it means original interaction was already handled.
+                if not interaction.response.is_done() and interaction.is_expired(): # Check if expired before trying to send
+                     pass # Can't send to expired interaction
+                elif not interaction.response.is_done():
+                     await interaction.followup.send("Guild selection is required for this action.", ephemeral=True)
+                return
+        elif not current_guild and interaction.guild: # Fallback if target_guild wasn't passed but original interaction is in guild
+            current_guild = interaction.guild
+
+        if not current_guild: # Still no guild after checks
+            if not interaction.response.is_done():
+                 await interaction.response.send_message("A server context is required to set up a gift code channel.", ephemeral=True)
+            else: # If deferred, use followup
+                 await interaction.followup.send("A server context is required to set up a gift code channel.", ephemeral=True)
+            return
+
+        # At this point, current_guild should be a valid discord.Guild object.
+        # The original setup_gift_channel relies on interaction.guild.
+        # We need to ensure it uses current_guild instead.
+        # Admin Check (Example - using global admin for now)
+        admin_info = await self.get_admin_info(interaction.user.id)
+        if not admin_info or admin_info[1] != 1: # is_initial == 1 for global admin
+            msg = "❌ You must be a Global Administrator to set up gift code channels."
+            if interaction.response.is_done(): await interaction.followup.send(msg, ephemeral=True)
+            else: await interaction.response.send_message(msg, ephemeral=True) # This might need to be edit_message if deferred
+            return
+
+        # Fetch alliances specific to current_guild
+        self.alliance_cursor.execute(
+            "SELECT alliance_id, name FROM alliance_list WHERE discord_server_id = ?",
+            (current_guild.id,)
+        )
+        guild_alliances = self.alliance_cursor.fetchall()
+
+        if not guild_alliances:
+            msg = f"❌ No alliances found for the server **{current_guild.name}**. Please add alliances first."
+            if interaction.response.is_done(): await interaction.followup.send(msg, ephemeral=True)
+            else: await interaction.response.edit_message(content=msg, view=None, embed=None) # edit if initial was defer
+            return
+
+        alliance_options = [
+            discord.SelectOption(label=name, value=str(alliance_id))
+            for alliance_id, name in guild_alliances
+        ]
+        alliance_select_menu = discord.ui.Select(placeholder="Select an alliance...", options=alliance_options)
+
+        async def alliance_select_callback(select_interaction: discord.Interaction):
+            selected_alliance_id = int(alliance_select_menu.values[0])
+
+            # List text channels from current_guild
+            text_channels = [ch for ch in current_guild.text_channels if ch.permissions_for(current_guild.me).send_messages]
+            if not text_channels:
+                await select_interaction.response.edit_message(content=f"❌ No text channels found in **{current_guild.name}** where I can send messages.", embed=None, view=None)
+                return
+
+            channel_options = [
+                discord.SelectOption(label=f"#{ch.name}", value=str(ch.id))
+                for ch in text_channels[:25]] # Select menu has max 25 options
+
+            channel_select_menu = discord.ui.Select(placeholder="Select a channel for gift codes...", options=channel_options)
+
+            async def channel_select_callback(channel_select_interaction: discord.Interaction):
+                selected_channel_id = int(channel_select_menu.values[0])
+
+                try:
+                    self.cursor.execute(
+                        "INSERT OR REPLACE INTO giftcode_channel (alliance_id, channel_id) VALUES (?, ?)",
+                        (selected_alliance_id, selected_channel_id)
+                    )
+                    self.conn.commit()
+
+                    selected_alliance_name = next((name for aid, name in guild_alliances if aid == selected_alliance_id), "Unknown Alliance")
+                    msg = f"✅ Gift code channel for **{selected_alliance_name}** in **{current_guild.name}** has been set to <#{selected_channel_id}>."
+                    await channel_select_interaction.response.edit_message(content=msg, embed=None, view=None)
+                except sqlite3.Error as e:
+                    self.logger.error(f"DB error setting gift channel: {e}")
+                    await channel_select_interaction.response.edit_message(content="❌ Database error occurred.", embed=None, view=None)
+
+            channel_select_menu.callback = channel_select_callback
+            new_view = discord.ui.View(timeout=180)
+            new_view.add_item(channel_select_menu)
+            await select_interaction.response.edit_message(content=f"Select a channel in **{current_guild.name}** for the selected alliance:", embed=None, view=new_view)
+
+        alliance_select_menu.callback = alliance_select_callback
+
+        view = discord.ui.View(timeout=180)
+        view.add_item(alliance_select_menu)
+
+        embed = discord.Embed(title=f"Setup Gift Code Channel for {current_guild.name}", description="Select the alliance for which you want to set the gift code channel.", color=discord.Color.blue())
+
+        if interaction.response.is_done(): # If deferred from guild prompt
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else: # If called directly with guild context (e.g. from GiftView button in a guild)
+             # This interaction is from the GiftView button, so we edit its message.
+            await interaction.response.edit_message(embed=embed, view=view)
+
+
+    async def delete_gift_channel_handler(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
+        current_guild = target_guild
+        response_method_prefix = interaction # for send_message or followup
+        initial_response_done = interaction.response.is_done()
+
+        if not current_guild and interaction.guild is None:
+            if not initial_response_done:
+                await interaction.response.defer(ephemeral=True)
+                initial_response_done = True # Defer counts as initial response
+            current_guild = await prompt_guild_selection(interaction, self.bot, interaction.user.id, "Delete Gift Channel")
+            if not current_guild: return
+            # If prompt was used, subsequent responses must be followups
+            response_method_prefix = interaction.followup
+        elif not current_guild and interaction.guild:
+            current_guild = interaction.guild
+
+        if not current_guild:
+            err_msg = "A server context is required to delete a gift code channel."
+            if initial_response_done: await response_method_prefix.send(err_msg, ephemeral=True)
+            else: await response_method_prefix.send_message(err_msg, ephemeral=True)
+            return
+
+        # Admin Check
+        admin_info = await self.get_admin_info(interaction.user.id)
+        if not admin_info or admin_info[1] != 1:
+            msg = "❌ You must be a Global Administrator to delete gift code channels."
+            if initial_response_done: await response_method_prefix.send(msg, ephemeral=True)
+            else: await interaction.response.edit_message(content=msg, embed=None, view=None) # Edit if from GiftView
+            return
+
+        # Fetch configured gift channels for this guild
+        query = """
+            SELECT gc.alliance_id, al.name, gc.channel_id
+            FROM giftcode_channel gc
+            JOIN alliance_list al ON gc.alliance_id = al.alliance_id
+            WHERE al.discord_server_id = ?
+        """
+        self.cursor.execute(query, (current_guild.id,))
+        configured_channels = self.cursor.fetchall()
+
+        if not configured_channels:
+            msg = f"ℹ️ No gift code channels are configured for alliances in **{current_guild.name}**."
+            if initial_response_done: await response_method_prefix.send(msg, ephemeral=True)
+            else: await interaction.response.edit_message(content=msg, embed=None, view=None)
+            return
+
+        options = []
+        for alliance_id, alliance_name, channel_id in configured_channels:
+            channel = current_guild.get_channel(channel_id)
+            channel_name = f"#{channel.name}" if channel else f"ID: {channel_id} (Unknown)"
+            options.append(discord.SelectOption(
+                label=f"{alliance_name}",
+                value=str(alliance_id),
+                description=f"Logs to: {channel_name}"
+            ))
+
+        select_menu = discord.ui.Select(placeholder="Select alliance to remove gift channel for...", options=options)
+
+        async def delete_channel_select_callback(select_interaction: discord.Interaction):
+            selected_alliance_id = int(select_menu.values[0])
+            try:
+                self.cursor.execute("DELETE FROM giftcode_channel WHERE alliance_id = ?", (selected_alliance_id,))
+                self.conn.commit()
+
+                deleted_alliance_name = next((name for aid, name, _ in configured_channels if aid == selected_alliance_id), "Unknown Alliance")
+                msg = f"✅ Gift code channel for **{deleted_alliance_name}** in **{current_guild.name}** has been removed."
+                await select_interaction.response.edit_message(content=msg, embed=None, view=None)
+            except sqlite3.Error as e:
+                self.logger.error(f"DB error deleting gift channel: {e}")
+                await select_interaction.response.edit_message(content="❌ Database error occurred.", embed=None, view=None)
+
+        select_menu.callback = delete_channel_select_callback
+        view = discord.ui.View(timeout=180)
+        view.add_item(select_menu)
+
+        embed = discord.Embed(title=f"🗑️ Delete Gift Code Channel for {current_guild.name}", description="Select an alliance to remove its gift code channel configuration.", color=discord.Color.red())
+
+        if initial_response_done: # From prompt_guild_selection or earlier defer
+            await response_method_prefix.send(embed=embed, view=view, ephemeral=True)
+        else: # From GiftView button click
+            await interaction.response.edit_message(embed=embed, view=view)
+
+
+    async def use_gift_for_alliance_handler(self, interaction: discord.Interaction, target_guild: Optional[discord.Guild]):
+        # This method in its current form (use_giftcode_for_alliance) is complex.
+        # It lists alliances. If the admin is not global, this list should be filtered by target_guild.
+        # For now, we call the existing method. It will need significant internal refactoring.
+        # The existing method handles its own responses.
+        await self.use_giftcode_for_alliance(interaction) # Original method did not take target_guild

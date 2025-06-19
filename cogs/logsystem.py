@@ -204,7 +204,7 @@ class LogSystem(commands.Cog):
 
             async def set_log_channel_select_callback(channel_interaction: discord.Interaction): # Renamed
                 selected_channel_id = int(channel_interaction.data["values"][0])
-                
+
                 self.settings_cursor.execute(
                     "INSERT OR REPLACE INTO alliance_logs (alliance_id, channel_id) VALUES (?, ?)",
                     (selected_alliance_id, selected_channel_id)
@@ -240,16 +240,146 @@ class LogSystem(commands.Cog):
 
 
     async def remove_log_channel_handler(self, interaction: discord.Interaction, target_guild: discord.Guild):
-        # Placeholder: Implement actual logic for removing log channel
-        # Needs to list alliances with set log channels (perhaps filtered by target_guild)
-        # and then confirm removal. Original logic from "remove_log_channel" needs adaptation.
-        await interaction.response.send_message(f"Placeholder for removing log channel for guild: {target_guild.name if target_guild else 'N/A'}. This feature is under development.", ephemeral=True)
+        self.settings_cursor.execute("SELECT is_initial FROM admin WHERE id = ?", (interaction.user.id,))
+        admin_record = self.settings_cursor.fetchone()
+        if not admin_record or admin_record[0] != 1:
+            await interaction.response.send_message("❌ Only global administrators can remove log channels.", ephemeral=True)
+            return
 
-    async def view_log_channel_handler(self, interaction: discord.Interaction, target_guild: discord.Guild):
-        # Placeholder: Implement actual logic for viewing log channels
-        # This should list alliances and their assigned log channels, possibly filtered by target_guild.
-        # Original logic from "view_log_channels" needs adaptation.
-        await interaction.response.send_message(f"Placeholder for viewing log channels for guild: {target_guild.name if target_guild else 'N/A'}. This feature is under development.", ephemeral=True)
+        # Fetch alliances that have logs set up AND are in the target_guild
+        query = """
+            SELECT al.alliance_id, al_list.name, al.channel_id
+            FROM alliance_logs al
+            JOIN alliance_list al_list ON al.alliance_id = al_list.alliance_id
+            WHERE al_list.discord_server_id = ?
+        """
+        self.settings_cursor.execute(query, (target_guild.id,))
+        log_entries = self.settings_cursor.fetchall()
+
+        if not log_entries:
+            await interaction.response.send_message(f"❌ No alliance log channels found for alliances in **{target_guild.name}**.", ephemeral=True)
+            return
+
+        # Use discord.ui.Select for dynamic options based on log_entries
+        options = []
+        for alliance_id, alliance_name, channel_id in log_entries:
+            channel = target_guild.get_channel(channel_id)
+            channel_mention = f"<#{channel_id}>" if channel else f"ID: {channel_id} (channel not found)"
+            options.append(discord.SelectOption(
+                label=f"{alliance_name[:50]}",
+                value=str(alliance_id),
+                description=f"Logs to: {channel_mention[:45]}"
+            ))
+
+        if not options: # Should not happen if log_entries is not empty, but as a safeguard
+             await interaction.response.send_message(f"❌ No valid log channel entries found for {target_guild.name}.", ephemeral=True)
+             return
+
+        select_menu = discord.ui.Select(placeholder="Select alliance to remove log channel for...", options=options)
+
+        async def remove_log_select_callback(select_interaction: discord.Interaction):
+            selected_alliance_id = int(select_menu.values[0])
+
+            # Find the selected entry to display its details
+            selected_entry = next((le for le in log_entries if le[0] == selected_alliance_id), None)
+            if not selected_entry:
+                await select_interaction.response.send_message("Error: Could not find selected alliance log entry.", ephemeral=True)
+                return
+
+            _, sel_alliance_name, sel_channel_id = selected_entry
+            sel_channel = target_guild.get_channel(sel_channel_id)
+            sel_channel_mention = f"<#{sel_channel_id}>" if sel_channel else f"ID: {sel_channel_id}"
+
+            confirm_embed = discord.Embed(
+                title="⚠️ Confirm Removal",
+                description=(
+                    f"Are you sure you want to remove the log channel for:\n\n"
+                    f"🏰 **Alliance:** {sel_alliance_name}\n"
+                    f"📝 **Current Log Channel:** {sel_channel_mention}\n\n"
+                    "This action cannot be undone!"
+                ),
+                color=discord.Color.yellow()
+            )
+
+            confirm_view = discord.ui.View(timeout=60)
+
+            async def confirm_action_callback(button_interaction: discord.Interaction):
+                custom_id = button_interaction.data.get("custom_id")
+                if custom_id == "confirm_remove_log":
+                    self.settings_cursor.execute("DELETE FROM alliance_logs WHERE alliance_id = ?", (selected_alliance_id,))
+                    self.settings_db.commit()
+                    success_embed = discord.Embed(
+                        title="✅ Log Channel Removed",
+                        description=f"Log channel for **{sel_alliance_name}** (was <#{sel_channel_id}>) removed.",
+                        color=discord.Color.green()
+                    )
+                    await button_interaction.response.edit_message(embed=success_embed, view=None)
+                elif custom_id == "cancel_remove_log":
+                    cancel_embed = discord.Embed(title="❌ Removal Cancelled", description="Log channel removal cancelled.", color=discord.Color.red())
+                    await button_interaction.response.edit_message(embed=cancel_embed, view=None)
+
+            confirm_btn = discord.ui.Button(label="Confirm", style=discord.ButtonStyle.danger, custom_id="confirm_remove_log")
+            cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary, custom_id="cancel_remove_log")
+            confirm_btn.callback = confirm_action_callback
+            cancel_btn.callback = confirm_action_callback
+            confirm_view.add_item(confirm_btn)
+            confirm_view.add_item(cancel_btn)
+
+            await select_interaction.response.edit_message(embed=confirm_embed, view=confirm_view)
+
+        select_menu.callback = remove_log_select_callback
+
+        view = discord.ui.View(timeout=180)
+        view.add_item(select_menu)
+
+        initial_embed = discord.Embed(
+            title="🗑️ Remove Log Channel",
+            description=f"Select an alliance in **{target_guild.name}** to remove its log channel assignment.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=initial_embed, view=view, ephemeral=True)
+
+
+    async def view_log_channels_handler(self, interaction: discord.Interaction, target_guild: discord.Guild):
+        self.settings_cursor.execute("SELECT is_initial FROM admin WHERE id = ?", (interaction.user.id,))
+        admin_record = self.settings_cursor.fetchone()
+        if not admin_record or admin_record[0] != 1:
+            await interaction.response.send_message("❌ Only global administrators can view log channels.", ephemeral=True)
+            return
+
+        query = """
+            SELECT al_list.name, al.channel_id
+            FROM alliance_logs al
+            JOIN alliance_list al_list ON al.alliance_id = al_list.alliance_id
+            WHERE al_list.discord_server_id = ?
+            ORDER BY al_list.name
+        """
+        self.settings_cursor.execute(query, (target_guild.id,))
+        log_entries = self.settings_cursor.fetchall()
+
+        if not log_entries:
+            await interaction.response.send_message(f"❌ No alliance log channels found for alliances in **{target_guild.name}**.", ephemeral=True)
+            return
+
+        list_embed = discord.Embed(
+            title=f"📊 Alliance Log Channels for {target_guild.name}",
+            description="Current log channel assignments for alliances in this server:\n\n",
+            color=discord.Color.blue()
+        )
+
+        for alliance_name, channel_id in log_entries:
+            channel = target_guild.get_channel(channel_id)
+            channel_mention = f"<#{channel_id}> ({channel.name})" if channel else f"ID: {channel_id} (Channel not found or inaccessible)"
+            list_embed.add_field(
+                name=f"🏰 {alliance_name}",
+                value=f"📝 **Log Channel:** {channel_mention}\n━━━━━━━━━━━━━━━━━━━━━━",
+                inline=False
+            )
+
+        if not list_embed.fields: # Should be caught by "if not log_entries" but as an extra check
+            list_embed.description = f"No log channels are currently set for alliances in **{target_guild.name}**."
+
+        await interaction.response.send_message(embed=list_embed, ephemeral=True)
 
 
 async def setup(bot):
