@@ -250,8 +250,7 @@ class GiftCodeAPI:
                                                         gift_operations = self.bot.get_cog('GiftOperations')
                                                         if gift_operations:
                                                             self.logger.info(f"Auto-distributing code {code} to alliance {alliance[0]}")
-                                                            asyncio.create_task(gift_operations.use_giftcode_for_alliance(alliance[0], code))
-                                                            await asyncio.sleep(5)
+                                                            await gift_operations.use_giftcode_for_alliance(alliance[0], code)
                                                         else:
                                                             self.logger.error("GiftOperations cog not found!")
                                                     except Exception as e:
