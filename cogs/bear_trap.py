@@ -9,6 +9,8 @@ import json
 import traceback
 import time
 
+from event_presets import EVENT_PRESETS
+
 class BearTrap(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -39,7 +41,11 @@ class BearTrap(commands.Cog):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by INTEGER NOT NULL,
                 last_notification TIMESTAMP,
-                next_notification TIMESTAMP
+                next_notification TIMESTAMP,
+                event_type TEXT DEFAULT 'generic',
+                event_preset TEXT,
+                auto_reminders INTEGER DEFAULT 0,
+                reminder_schedule TEXT
             )
         """)
 
@@ -78,12 +84,84 @@ class BearTrap(commands.Cog):
             )
         """)
 
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS event_presets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_name TEXT UNIQUE,
+                default_title TEXT,
+                default_description TEXT,
+                default_color TEXT,
+                default_thumbnail TEXT,
+                default_reminder_times TEXT,
+                typical_duration INTEGER,
+                frequency_type TEXT,
+                urgency_level INTEGER,
+                quick_tips TEXT
+            )
+        """)
+
+        for column_def in [
+            ("event_type", "TEXT", "'generic'"),
+            ("event_preset", "TEXT", "NULL"),
+            ("auto_reminders", "INTEGER", "0"),
+            ("reminder_schedule", "TEXT", "NULL")
+        ]:
+            try:
+                self.cursor.execute(
+                    f"ALTER TABLE bear_notifications ADD COLUMN {column_def[0]} {column_def[1]} DEFAULT {column_def[2]}"
+                )
+            except sqlite3.OperationalError:
+                pass
+
         try:
             self.cursor.execute("SELECT mention_message FROM bear_notification_embeds LIMIT 1")
         except sqlite3.OperationalError:
             self.cursor.execute("ALTER TABLE bear_notification_embeds ADD COLUMN mention_message TEXT")
 
+        self.load_default_event_presets()
+
         self.conn.commit()
+
+    def load_default_event_presets(self) -> None:
+        """Insert default event presets into the database if they don't exist."""
+        for preset in EVENT_PRESETS.values():
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO event_presets (event_name, default_title, default_description, default_color, default_thumbnail, default_reminder_times, typical_duration, frequency_type, urgency_level, quick_tips) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    preset["event_name"],
+                    preset["default_title"],
+                    preset["default_description"],
+                    preset["default_color"],
+                    preset["default_thumbnail"],
+                    json.dumps(preset.get("default_reminder_times", [])),
+                    preset.get("typical_duration"),
+                    preset.get("frequency_type"),
+                    preset.get("urgency_level"),
+                    json.dumps(preset.get("quick_tips", [])),
+                ),
+            )
+
+    def get_event_preset(self, event_type: str) -> dict | None:
+        """Return event preset information from the database."""
+        self.cursor.execute(
+            "SELECT default_title, default_description, default_color, default_thumbnail, default_reminder_times, typical_duration, frequency_type, urgency_level, quick_tips FROM event_presets WHERE event_name = ?",
+            (event_type,),
+        )
+        row = self.cursor.fetchone()
+        if row:
+            return {
+                "event_name": event_type,
+                "default_title": row[0],
+                "default_description": row[1],
+                "default_color": row[2],
+                "default_thumbnail": row[3],
+                "default_reminder_times": json.loads(row[4]) if row[4] else [],
+                "typical_duration": row[5],
+                "frequency_type": row[6],
+                "urgency_level": row[7],
+                "quick_tips": json.loads(row[8]) if row[8] else [],
+            }
+        return None
 
     async def cog_load(self):
 
@@ -108,7 +186,8 @@ class BearTrap(commands.Cog):
                                 hour: int, minute: int, timezone: str, description: str,
                                 created_by: int, notification_type: int, mention_type: str,
                                 repeat_48h: bool, repeat_minutes: int = 0,
-                                selected_weekdays: list[int] = None) -> int:
+                                selected_weekdays: list[int] = None,
+                                event_type: str = 'generic') -> int:
         try:
             embed_data = None
             notification_description = description
@@ -135,14 +214,31 @@ class BearTrap(commands.Cog):
                 tzinfo=tz
             )
 
-            self.cursor.execute("""
-                INSERT INTO bear_notifications 
-                (guild_id, channel_id, hour, minute, timezone, description, notification_type,
-                mention_type, repeat_enabled, repeat_minutes, created_by, next_notification)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (guild_id, channel_id, hour, minute, timezone, notification_description, notification_type,
-                  mention_type, 1 if repeat_48h else 0, repeat_minutes, created_by,
-                  next_notification.isoformat()))
+            event_preset = None
+            if event_type != 'generic':
+                preset = self.get_event_preset(event_type)
+                if preset:
+                    event_preset = json.dumps(preset)
+
+            self.cursor.execute(
+                "INSERT INTO bear_notifications (guild_id, channel_id, hour, minute, timezone, description, notification_type, mention_type, repeat_enabled, repeat_minutes, created_by, next_notification, event_type, event_preset) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    guild_id,
+                    channel_id,
+                    hour,
+                    minute,
+                    timezone,
+                    notification_description,
+                    notification_type,
+                    mention_type,
+                    1 if repeat_48h else 0,
+                    repeat_minutes,
+                    created_by,
+                    next_notification.isoformat(),
+                    event_type,
+                    event_preset,
+                ),
+            )
 
             notification_id = self.cursor.lastrowid
 
@@ -805,7 +901,8 @@ class RepeatOptionView(discord.ui.View):
                 mention_type=self.mention_type,
                 repeat_48h=repeat,
                 repeat_minutes=repeat_minutes,
-                selected_weekdays=selected_weekdays
+                selected_weekdays=selected_weekdays,
+                event_type='generic'
             )
 
             notification_types = {
