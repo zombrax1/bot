@@ -6,13 +6,14 @@ import ssl
 import time
 import asyncio
 import sqlite3
+import os
 
 class WCommand(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.conn = sqlite3.connect('db/changes.sqlite')
         self.c = self.conn.cursor()
-        self.SECRET = "tB87#kPtkxqOS2"
+        self.SECRET = os.getenv("CENTURY_API_SECRET")
         
         self.level_mapping = {
             31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
@@ -73,8 +74,6 @@ class WCommand(commands.Cog):
             url = 'https://wos-giftcode-api.centurygame.com/api/player'
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
             ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
 
             max_retries = 3
             retry_delay = 60

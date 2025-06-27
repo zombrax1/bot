@@ -672,14 +672,10 @@ if __name__ == "__main__":
 
     init(autoreset=True)
 
-    token_file = "bot_token.txt"
-    if not os.path.exists(token_file):
-        bot_token = input("Enter the bot token: ")
-        with open(token_file, "w") as f:
-            f.write(bot_token)
-    else:
-        with open(token_file, "r") as f:
-            bot_token = f.read().strip()
+    bot_token = os.getenv("DISCORD_BOT_TOKEN")
+    if not bot_token:
+        print(Fore.RED + "DISCORD_BOT_TOKEN environment variable not set." + Style.RESET_ALL)
+        sys.exit(1)
 
     if not os.path.exists("db"):
         os.makedirs("db")

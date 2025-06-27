@@ -1,5 +1,7 @@
 # Whiteout Survival Discord Bot
 
+**Last Updated: 2025-06-27**
+
 Whiteout Survival Discord Bot that supports alliance management, event reminders, gift code redemption and more.
 
 This guide explains how to manually update your existing bot installation so that gift code redemption works again.
@@ -92,8 +94,9 @@ Upgrading from the "Relo/Patch Versions" before 1.0.0:
     *   Run `python install.py` to install the bot. This should automatically pull main.py and other files into the directory.
 
 3.  **▶️ Start the Bot:**
+    *   Set the `DISCORD_BOT_TOKEN` environment variable with your bot token.
+    *   Optionally set `GIFT_API_KEY` and `CENTURY_API_SECRET` for gift code operations.
     *   In your terminal or command prompt **in the same directory you created**, run `python main.py` to start the bot.
-    *   When prompted for a Discord bot token, enter your bot token. The bot should now initialize and connect to Discord.
 
 4.  **🔧 Run /settings in Discord:**
     *   Remember to run /settings for the bot in Discord to configure yourself as the admin.
@@ -111,9 +114,16 @@ If you encounter issues with this patch, reach out to the [project admins](https
 
 ---
 
-## 🛠️ Patch Notes 
+## 🛠️ Patch Notes
 
-### Version v1.2.0 (Current)
+### Version v1.2.1 (Current) - 2025-06-27
+- Alliance admins are now limited to their assigned alliances unless marked as global admins.
+- Removed hard-coded secrets from cogs; `CENTURY_API_SECRET` and `GIFT_API_KEY` must be set via environment variables.
+- The bot token is loaded from `DISCORD_BOT_TOKEN` instead of a file and Docker scripts reflect this.
+- Docker compose file renamed to `docker-compose.yml`.
+- Documentation updated accordingly.
+
+### Version v1.2.0
 - Implemented a **self-hosted GitLab repo** as a backup in case GitHub fails us again.  
 - The bot now checks GitHub first, then falls back to GitLab if needed.
 - The bot **automatically creates and manages Python virtual environments**.  

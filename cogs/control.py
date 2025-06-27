@@ -13,7 +13,7 @@ from aiohttp_socks import ProxyConnector
 import traceback
 import ssl
 
-SECRET = 'tB87#kPtkxqOS2'
+SECRET = os.getenv("CENTURY_API_SECRET")
 
 level_mapping = {
     31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
@@ -80,8 +80,6 @@ class Control(commands.Cog):
 
         try:
             ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
             
             timeout = aiohttp.ClientTimeout(total=30, connect=10)
             connector_kwargs = {

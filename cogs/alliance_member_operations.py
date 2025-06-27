@@ -11,7 +11,7 @@ from datetime import datetime
 import os
 import ssl
 
-SECRET = 'tB87#kPtkxqOS2'
+SECRET = os.getenv("CENTURY_API_SECRET")
 
 class PaginationView(discord.ui.View):
     def __init__(self, chunks: List[discord.Embed], author_id: int):
@@ -1144,8 +1144,6 @@ class AllianceMemberOperations(commands.Cog):
                         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
                         ssl_context = ssl.create_default_context()
-                        ssl_context.check_hostname = False
-                        ssl_context.verify_mode = ssl.CERT_NONE
 
                         connector = aiohttp.TCPConnector(ssl=ssl_context)
                         async with aiohttp.ClientSession(connector=connector) as session:

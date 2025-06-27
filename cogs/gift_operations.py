@@ -115,7 +115,7 @@ class GiftOperations(commands.Cog):
         self.wos_giftcode_url = "https://wos-giftcode-api.centurygame.com/api/gift_code"
         self.wos_captcha_url = "https://wos-giftcode-api.centurygame.com/api/captcha"
         self.wos_giftcode_redemption_url = "https://wos-giftcode.centurygame.com"
-        self.wos_encrypt_key = "tB87#kPtkxqOS2"
+        self.wos_encrypt_key = os.getenv("CENTURY_API_SECRET")
 
         # Retry Configuration for Requests
         self.retry_config = Retry(

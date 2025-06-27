@@ -1436,25 +1436,50 @@ class MemberOperationsView(discord.ui.View):
         self.cog = cog
 
     async def get_admin_alliances(self, user_id, guild_id):
-        self.cog.c_settings.execute("SELECT id, is_initial FROM admin WHERE id = ?", (user_id,))
+        """Return alliances the admin is allowed to manage.
+
+        Global admins (``is_initial == 1``) can see all alliances. Other admins
+        may only see alliances explicitly assigned to them via the ``adminserver``
+        table.  Returns ``(alliances, special_alliances, is_global)`` to match
+        the other cogs.
+        """
+
+        self.cog.c_settings.execute(
+            "SELECT is_initial FROM admin WHERE id = ?",
+            (user_id,),
+        )
         admin = self.cog.c_settings.fetchone()
 
         if admin is None:
-            return []
+            return [], [], False
 
-        is_initial = admin[1]
+        is_initial = admin[0]
 
         if is_initial == 1:
-            self.cog.c.execute("SELECT alliance_id, name FROM alliance_list ORDER BY name")
-        else:
-            self.cog.c.execute("""
-                SELECT alliance_id, name 
-                FROM alliance_list 
-                WHERE discord_server_id = ? 
-                ORDER BY name
-            """, (guild_id,))
+            self.cog.c.execute(
+                "SELECT alliance_id, name FROM alliance_list ORDER BY name"
+            )
+            alliances = self.cog.c.fetchall()
+            return alliances, [], True
 
-        return self.cog.c.fetchall()
+        self.cog.c_settings.execute(
+            "SELECT alliances_id FROM adminserver WHERE admin = ?",
+            (user_id,),
+        )
+        alliance_ids = [row[0] for row in self.cog.c_settings.fetchall()]
+
+        if not alliance_ids:
+            return [], [], False
+
+        placeholders = ",".join("?" for _ in alliance_ids)
+        query = (
+            "SELECT alliance_id, name FROM alliance_list "
+            f"WHERE alliance_id IN ({placeholders}) ORDER BY name"
+        )
+        self.cog.c.execute(query, alliance_ids)
+        alliances = self.cog.c.fetchall()
+
+        return alliances, alliances, False
 
     @discord.ui.button(label="Add Member", emoji="➕", style=discord.ButtonStyle.primary, custom_id="add_member")
     async def add_member_button(self, interaction: discord.Interaction, button: discord.ui.Button):
