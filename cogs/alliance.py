@@ -1,9 +1,11 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import sqlite3  
+import sqlite3
 import asyncio
 from datetime import datetime
+import aiosqlite
+import db
 
 class Alliance(commands.Cog):
     def __init__(self, bot, conn):
@@ -1444,11 +1446,12 @@ class MemberOperationsView(discord.ui.View):
         the other cogs.
         """
 
-        self.cog.c_settings.execute(
+        settings_conn = await db.get_connection('db/settings.sqlite')
+        async with settings_conn.execute(
             "SELECT is_initial FROM admin WHERE id = ?",
             (user_id,),
-        )
-        admin = self.cog.c_settings.fetchone()
+        ) as cursor:
+            admin = await cursor.fetchone()
 
         if admin is None:
             return [], [], False
@@ -1456,17 +1459,19 @@ class MemberOperationsView(discord.ui.View):
         is_initial = admin[0]
 
         if is_initial == 1:
-            self.cog.c.execute(
+            alliance_conn = await db.get_connection('db/alliance.sqlite')
+            async with alliance_conn.execute(
                 "SELECT alliance_id, name FROM alliance_list ORDER BY name"
-            )
-            alliances = self.cog.c.fetchall()
+            ) as cursor:
+                alliances = await cursor.fetchall()
             return alliances, [], True
 
-        self.cog.c_settings.execute(
+        async with settings_conn.execute(
             "SELECT alliances_id FROM adminserver WHERE admin = ?",
             (user_id,),
-        )
-        alliance_ids = [row[0] for row in self.cog.c_settings.fetchall()]
+        ) as cursor:
+            rows = await cursor.fetchall()
+        alliance_ids = [row[0] for row in rows]
 
         if not alliance_ids:
             return [], [], False
@@ -1476,8 +1481,9 @@ class MemberOperationsView(discord.ui.View):
             "SELECT alliance_id, name FROM alliance_list "
             f"WHERE alliance_id IN ({placeholders}) ORDER BY name"
         )
-        self.cog.c.execute(query, alliance_ids)
-        alliances = self.cog.c.fetchall()
+        alliance_conn = await db.get_connection('db/alliance.sqlite')
+        async with alliance_conn.execute(query, alliance_ids) as cursor:
+            alliances = await cursor.fetchall()
 
         return alliances, alliances, False
 

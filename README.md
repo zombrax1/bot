@@ -121,6 +121,8 @@ If you encounter issues with this patch, reach out to the [project admins](https
 - Removed hard-coded secrets from cogs; `CENTURY_API_SECRET` and `GIFT_API_KEY` must be set via environment variables.
 - The bot token is loaded from `DISCORD_BOT_TOKEN` instead of a file and Docker scripts reflect this.
 - Docker compose file renamed to `docker-compose.yml`.
+- Added a shared `aiosqlite` database helper for async operations.
+- Removed legacy `olddb` and `wel` cogs and created a minimal `requirements.txt`.
 - Documentation updated accordingly.
 
 ### Version v1.2.0
