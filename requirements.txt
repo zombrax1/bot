@@ -1,0 +1,8 @@
+aiosqlite>=0.19
+aiohttp
+aiohttp_socks
+discord.py
+requests
+colorama
+python-dotenv
+certifi

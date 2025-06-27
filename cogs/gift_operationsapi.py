@@ -8,6 +8,7 @@ from datetime import datetime
 import discord
 import ssl
 import logging
+import os
 
 logger = logging.getLogger("gift_operationsapi")
 
@@ -15,7 +16,7 @@ class GiftCodeAPI:
     def __init__(self, bot):
         self.bot = bot
         self.api_url = "http://gift-code-api.whiteout-bot.com/giftcode_api.php"
-        self.api_key = "super_secret_bot_token_nobody_will_ever_find"
+        self.api_key = os.getenv("GIFT_API_KEY", "")
         
         # Random 5-10min check interval to help reduce API load
         self.min_check_interval = 300
@@ -44,8 +45,6 @@ class GiftCodeAPI:
         self.users_cursor = self.users_conn.cursor()
         
         self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
         
         self.logger = logging.getLogger("gift_operationsapi")
         

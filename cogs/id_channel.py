@@ -10,7 +10,7 @@ import aiohttp
 import ssl
 from discord.ext import tasks
 
-SECRET = "tB87#kPtkxqOS2"
+SECRET = os.getenv("CENTURY_API_SECRET")
 
 class IDChannel(commands.Cog):
     def __init__(self, bot):
@@ -215,9 +215,6 @@ class IDChannel(commands.Cog):
                     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
                     ssl_context = ssl.create_default_context()
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl.CERT_NONE
-
                     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                         async with session.post('https://wos-giftcode-api.centurygame.com/api/player', headers=headers, data=form) as response:
                             if response.status == 429:
