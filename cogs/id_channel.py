@@ -219,7 +219,8 @@ class IDChannel(commands.Cog):
                     ssl_context.verify_mode = ssl.CERT_NONE
 
                     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
-                        async with session.post('https://wos-giftcode-api.centurygame.com/api/player', headers=headers, data=form) as response:
+                        base_url = os.getenv('WOS_BASE_URL', 'https://wos-giftcode-api.centurygame.com')
+                        async with session.post(f"{base_url}/api/player", headers=headers, data=form) as response:
                             if response.status == 429:
                                 if attempt < max_retries - 1:
                                     warning_embed = discord.Embed(

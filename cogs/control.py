@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
 import hashlib
+import os
 import time
 import sqlite3
 import asyncio
@@ -71,7 +72,8 @@ class Control(commands.Cog):
         return proxies
 
     async def fetch_user_data(self, fid, proxy=None):
-        url = 'https://wos-giftcode-api.centurygame.com/api/player'
+        base_url = os.getenv('WOS_BASE_URL', 'https://wos-giftcode-api.centurygame.com')
+        url = f"{base_url}/api/player"
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         current_time = int(time.time() * 1000)
         form = f"fid={fid}&time={current_time}"

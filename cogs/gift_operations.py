@@ -110,11 +110,16 @@ class GiftOperations(commands.Cog):
             # Column already exists
             pass
 
-        # WOS API URLs and Key
-        self.wos_player_info_url = "https://wos-giftcode-api.centurygame.com/api/player"
-        self.wos_giftcode_url = "https://wos-giftcode-api.centurygame.com/api/gift_code"
-        self.wos_captcha_url = "https://wos-giftcode-api.centurygame.com/api/captcha"
-        self.wos_giftcode_redemption_url = "https://wos-giftcode.centurygame.com"
+        # WOS API URLs and Key (can be overridden with environment variables)
+        self.wos_base_url = os.getenv(
+            "WOS_BASE_URL", "https://wos-giftcode-api.centurygame.com"
+        )
+        self.wos_player_info_url = f"{self.wos_base_url}/api/player"
+        self.wos_giftcode_url = f"{self.wos_base_url}/api/gift_code"
+        self.wos_captcha_url = f"{self.wos_base_url}/api/captcha"
+        self.wos_giftcode_redemption_url = os.getenv(
+            "WOS_GIFTCODE_REDEMPTION_URL", "https://wos-giftcode.centurygame.com"
+        )
         self.wos_encrypt_key = "tB87#kPtkxqOS2"
 
         # Retry Configuration for Requests
