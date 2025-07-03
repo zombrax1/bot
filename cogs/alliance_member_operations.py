@@ -4,6 +4,7 @@ from discord import app_commands
 import sqlite3
 import aiohttp
 import hashlib
+import os
 import time
 import asyncio
 from typing import List
@@ -1149,7 +1150,8 @@ class AllianceMemberOperations(commands.Cog):
 
                         connector = aiohttp.TCPConnector(ssl=ssl_context)
                         async with aiohttp.ClientSession(connector=connector) as session:
-                            async with session.post('https://wos-giftcode-api.centurygame.com/api/player', headers=headers, data=form) as response:
+                            base_url = os.getenv('WOS_BASE_URL', 'https://wos-giftcode-api.centurygame.com')
+                            async with session.post(f"{base_url}/api/player", headers=headers, data=form) as response:
                                 with open(log_file_path, 'a', encoding='utf-8') as log_file:
                                     log_file.write(f"\nAPI Response for FID {fid}:\n")
                                     log_file.write(f"Status Code: {response.status}\n")

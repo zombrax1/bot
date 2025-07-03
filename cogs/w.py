@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import aiohttp
 import hashlib
+import os
 import ssl
 import time
 import asyncio
@@ -70,7 +71,8 @@ class WCommand(commands.Cog):
             sign = hashlib.md5((form + self.SECRET).encode('utf-8')).hexdigest()
             form = f"sign={sign}&{form}"
 
-            url = 'https://wos-giftcode-api.centurygame.com/api/player'
+            base_url = os.getenv('WOS_BASE_URL', 'https://wos-giftcode-api.centurygame.com')
+            url = f"{base_url}/api/player"
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False

@@ -111,6 +111,20 @@ If you encounter issues with this patch, reach out to the [project admins](https
 
 ---
 
+## 🏡 Local API Usage
+
+If the external gift code API is unavailable, you can run a simple local replacement.
+
+1. Install dependencies: `pip install fastapi uvicorn pydantic`
+2. Start the API server with `python -m uvicorn local_api:app --reload` (default port `8000`).
+3. Set environment variables so the bot uses your local server:
+   - `GIFT_API_URL` (e.g. `http://127.0.0.1:8000/giftcode_api.php`)
+   - `WOS_BASE_URL` (e.g. `http://127.0.0.1:8000`)
+
+Restart the bot after setting these variables.
+
+---
+
 ## 🛠️ Patch Notes 
 
 ### Version v1.2.0 (Current)
