@@ -1,0 +1,14 @@
+# .gitlab-ci.yml
+
+test_job:
+  stage: test
+  image: python:3.12-slim # The Docker executor will pull this image
+  tags:
+    - docker # Ensure job is picked up by the runner
+    - linux
+  script:
+    - echo "This job is running on a runner tagged with 'docker' and 'linux'."
+    - echo "All my outbound internet traffic (like 'apt install' or 'pip install') goes through the WARP Gateway."
+    - apt-get update && apt-get install -y curl
+    - curl https://www.cloudflare.com/cdn-cgi/trace | grep warp
+    - python3 --version
