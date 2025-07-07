@@ -1,5 +1,6 @@
 # .gitlab-ci.yml
 
+<<<<<<< HEAD
 sync_from_github:
   stage: deploy
   image: alpine/git:latest
@@ -25,3 +26,17 @@ sync_from_github:
   rules:
     # Run ONLY when triggered by a webhook.
     - if: '$CI_PIPELINE_SOURCE == "trigger"'
+=======
+test_job:
+  stage: test
+  image: python:3.12-slim # The Docker executor will pull this image
+  tags:
+    - docker # Ensure job is picked up by the runner
+    - linux
+  script:
+    - echo "This job is running on a runner tagged with 'docker' and 'linux'."
+    - echo "All my outbound internet traffic (like 'apt install' or 'pip install') goes through the WARP Gateway."
+    - apt-get update && apt-get install -y curl
+    - curl https://www.cloudflare.com/cdn-cgi/trace | grep warp
+    - python3 --version
+>>>>>>> 9feb4b6e78a2e86acd99edd93a2f4501a307fedf
