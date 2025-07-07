@@ -416,7 +416,7 @@ class Alliance(commands.Cog):
                                         )
                                         channel = select_interaction.channel
                                         msg = await channel.fetch_message(message_id)
-                                        await select_interaction.edit_original_response(embed=queue_status_embed)
+                                        await msg.edit(embed=queue_status_embed)
 
                                         self.c.execute("""
                                             SELECT channel_id FROM alliancesettings WHERE alliance_id = ?
