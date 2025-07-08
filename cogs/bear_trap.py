@@ -19,6 +19,7 @@ class BearTrap(commands.Cog):
         self.db_path = 'db/beartime.sqlite'
         os.makedirs('db', exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
+        self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
 
         # Rate limiting for channel unavailable warnings
@@ -241,7 +242,8 @@ class BearTrap(commands.Cog):
                     try:
                         await self.process_notification(notification)
                     except Exception as e:
-                        print(f"Error processing notification {notification[0]}: {e}")
+                        identifier = notification['id'] if isinstance(notification, sqlite3.Row) else notification[0]
+                        print(f"Error processing notification {identifier}: {e}")
                         continue
 
             except Exception as e:
@@ -250,12 +252,19 @@ class BearTrap(commands.Cog):
             await asyncio.sleep(0.1)
 
     async def process_notification(self, notification):
-        notification_id = notification[0]
         try:
-            (notification_id, guild_id, channel_id, hour, minute, timezone, description,
-             notification_type, mention_type, repeat_enabled, repeat_minutes,
-             is_enabled, created_at, created_by, last_notification,
-             next_notification) = notification
+            notification_id = notification['id'] if isinstance(notification, sqlite3.Row) else notification[0]
+            channel_id = notification['channel_id'] if isinstance(notification, sqlite3.Row) else notification[2]
+            hour = notification['hour'] if isinstance(notification, sqlite3.Row) else notification[3]
+            minute = notification['minute'] if isinstance(notification, sqlite3.Row) else notification[4]
+            timezone = notification['timezone'] if isinstance(notification, sqlite3.Row) else notification[5]
+            description = notification['description'] if isinstance(notification, sqlite3.Row) else notification[6]
+            notification_type = notification['notification_type'] if isinstance(notification, sqlite3.Row) else notification[7]
+            mention_type = notification['mention_type'] if isinstance(notification, sqlite3.Row) else notification[8]
+            repeat_enabled = notification['repeat_enabled'] if isinstance(notification, sqlite3.Row) else notification[9]
+            repeat_minutes = notification['repeat_minutes'] if isinstance(notification, sqlite3.Row) else notification[10]
+            is_enabled = notification['is_enabled'] if isinstance(notification, sqlite3.Row) else notification[11]
+            next_notification = notification['next_notification'] if isinstance(notification, sqlite3.Row) else notification[15]
 
             if not is_enabled:
                 return
