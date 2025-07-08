@@ -9,6 +9,9 @@ import json
 import traceback
 import time
 
+VIEW_TIMEOUT = 300  # default timeout for UI views
+CHANNEL_WARNING_INTERVAL = 300  # seconds between channel unavailable warnings
+
 class BearTrap(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -16,11 +19,12 @@ class BearTrap(commands.Cog):
         self.db_path = 'db/beartime.sqlite'
         os.makedirs('db', exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
+        self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
 
         # Rate limiting for channel unavailable warnings
         self.channel_warning_timestamps = {}
-        self.channel_warning_interval = 300
+        self.channel_warning_interval = CHANNEL_WARNING_INTERVAL
 
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS bear_notifications (
@@ -234,12 +238,12 @@ class BearTrap(commands.Cog):
                 """)
                 notifications = self.cursor.fetchall()
 
-                now = datetime.now(pytz.UTC)
                 for notification in notifications:
                     try:
                         await self.process_notification(notification)
                     except Exception as e:
-                        print(f"Error processing notification {notification[0]}: {e}")
+                        identifier = notification['id'] if isinstance(notification, sqlite3.Row) else notification[0]
+                        print(f"Error processing notification {identifier}: {e}")
                         continue
 
             except Exception as e:
@@ -249,16 +253,18 @@ class BearTrap(commands.Cog):
 
     async def process_notification(self, notification):
         try:
-            (id, guild_id, channel_id, hour, minute, timezone, description,
-             notification_type, mention_type, repeat_enabled, repeat_minutes,
-             is_enabled, created_at, created_by, last_notification,
-             next_notification) = notification
-
-            weekly_repeat_days = []
-            if repeat_enabled and repeat_minutes == 0:
-                self.cursor.execute("SELECT weekday FROM notification_days WHERE notification_id = ?", (id,))
-                weekly_repeat_days = [row[0] for row in self.cursor.fetchall()]
-
+            notification_id = notification['id'] if isinstance(notification, sqlite3.Row) else notification[0]
+            channel_id = notification['channel_id'] if isinstance(notification, sqlite3.Row) else notification[2]
+            hour = notification['hour'] if isinstance(notification, sqlite3.Row) else notification[3]
+            minute = notification['minute'] if isinstance(notification, sqlite3.Row) else notification[4]
+            timezone = notification['timezone'] if isinstance(notification, sqlite3.Row) else notification[5]
+            description = notification['description'] if isinstance(notification, sqlite3.Row) else notification[6]
+            notification_type = notification['notification_type'] if isinstance(notification, sqlite3.Row) else notification[7]
+            mention_type = notification['mention_type'] if isinstance(notification, sqlite3.Row) else notification[8]
+            repeat_enabled = notification['repeat_enabled'] if isinstance(notification, sqlite3.Row) else notification[9]
+            repeat_minutes = notification['repeat_minutes'] if isinstance(notification, sqlite3.Row) else notification[10]
+            is_enabled = notification['is_enabled'] if isinstance(notification, sqlite3.Row) else notification[11]
+            next_notification = notification['next_notification'] if isinstance(notification, sqlite3.Row) else notification[15]
 
             if not is_enabled:
                 return
@@ -266,7 +272,7 @@ class BearTrap(commands.Cog):
             channel = self.bot.get_channel(channel_id)
             if not channel:
                 if self.should_warn_about_channel(channel_id):
-                    print(f"Warning: Channel {channel_id} not found for notification {id}.")
+                    print(f"Warning: Channel {channel_id} not found for notification {notification_id}.")
                 return
 
             tz = pytz.timezone(timezone)
@@ -285,7 +291,7 @@ class BearTrap(commands.Cog):
                         self.cursor.execute("""
                                     SELECT weekday FROM notification_days
                                     WHERE notification_id = ?
-                                """, (id,))
+                                """, (notification_id,))
                         rows = self.cursor.fetchall()
                         notification_days = set()
 
@@ -308,10 +314,10 @@ class BearTrap(commands.Cog):
                         next_time = next_time + timedelta(days=1)
 
                 self.cursor.execute("""
-                    UPDATE bear_notifications 
-                    SET next_notification = ? 
+                    UPDATE bear_notifications
+                    SET next_notification = ?
                     WHERE id = ?
-                """, (next_time.isoformat(), id))
+                """, (next_time.isoformat(), notification_id))
                 self.conn.commit()
                 return
 
@@ -355,7 +361,7 @@ class BearTrap(commands.Cog):
                         WHERE notification_id = ? 
                         AND notification_time = ? 
                         AND sent_at >= ?
-                    """, (id, notify_time, thirty_seconds_ago))
+                    """, (notification_id, notify_time, thirty_seconds_ago))
 
                     count = self.cursor.fetchone()[0]
                     if count == 0:
@@ -405,7 +411,7 @@ class BearTrap(commands.Cog):
 
                 if "EMBED_MESSAGE:" in description:
                     try:
-                        embed_data = await self.get_notification_embed(id)
+                        embed_data = await self.get_notification_embed(notification_id)
 
                         if embed_data:
                             try:
@@ -527,21 +533,21 @@ class BearTrap(commands.Cog):
                 self.cursor.execute("""
                     INSERT INTO notification_history (notification_id, notification_time, sent_at)
                     VALUES (?, ?, ?)
-                """, (id, current_time, current_time_str))
+                """, (notification_id, current_time, current_time_str))
 
                 self.cursor.execute("""
-                    UPDATE bear_notifications 
-                    SET last_notification = ? 
+                    UPDATE bear_notifications
+                    SET last_notification = ?
                     WHERE id = ?
-                """, (now.isoformat(), id))
+                """, (now.isoformat(), notification_id))
 
                 if not repeat_enabled and current_time == min(notification_times):
-                    print(f"Warning: (current_time: {current_time}) repeat isnt enabled and last notification was sent for notification {id} at {notification_times}. Disabling the notification")
+                    print(f"Warning: (current_time: {current_time}) repeat isnt enabled and last notification was sent for notification {notification_id} at {notification_times}. Disabling the notification")
                     self.cursor.execute("""
                         UPDATE bear_notifications 
                         SET is_enabled = 0 
                         WHERE id = ?
-                    """, (id,))
+                    """, (notification_id,))
 
                 if rounded_time == 0:
                     if repeat_enabled:
@@ -553,7 +559,7 @@ class BearTrap(commands.Cog):
                             self.cursor.execute("""
                                         SELECT weekday FROM notification_days
                                         WHERE notification_id = ?
-                                    """, (id,))
+                                    """, (notification_id,))
                             rows = self.cursor.fetchall()
                             notification_days = set()
 
@@ -568,23 +574,23 @@ class BearTrap(commands.Cog):
                                     break
 
                         self.cursor.execute("""
-                            UPDATE bear_notifications 
-                            SET next_notification = ? 
+                            UPDATE bear_notifications
+                            SET next_notification = ?
                             WHERE id = ?
-                        """, (next_time.isoformat(), id))
+                        """, (next_time.isoformat(), notification_id))
 
                     else:
-                        print(f"Warning: (current_time: {current_time}) repeat isnt enabled (repeat = {repeat_enabled}) or repeat minutes arent > 0 (repeat minutes = {repeat_minutes}) for notification {id}. Disabling notification")
+                        print(f"Warning: (current_time: {current_time}) repeat isnt enabled (repeat = {repeat_enabled}) or repeat minutes arent > 0 (repeat minutes = {repeat_minutes}) for notification {notification_id}. Disabling notification")
                         self.cursor.execute("""
-                            UPDATE bear_notifications 
-                            SET is_enabled = 0 
+                            UPDATE bear_notifications
+                            SET is_enabled = 0
                             WHERE id = ?
-                        """, (id,))
+                        """, (notification_id,))
 
                 self.conn.commit()
 
         except Exception as e:
-            error_msg = f"[ERROR] Error processing notification {id}: {str(e)}\nType: {type(e)}\nTrace: {traceback.format_exc()}"
+            error_msg = f"[ERROR] Error processing notification {notification_id}: {str(e)}\nType: {type(e)}\nTrace: {traceback.format_exc()}"
             print(error_msg)
 
     async def get_notifications(self, guild_id: int) -> list:
@@ -756,7 +762,7 @@ class BearTrap(commands.Cog):
 class RepeatOptionView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id, notification_type,
                  mention_type, original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -784,7 +790,7 @@ class RepeatOptionView(discord.ui.View):
 
     async def save_notification(self, interaction, repeat, repeat_minutes=0, interval_text=None, selected_weekdays=None):
         try:
-            notification_id = await self.cog.save_notification(
+            await self.cog.save_notification(
                 guild_id=interaction.guild_id,
                 channel_id=self.channel_id,
                 start_date=self.start_date,
@@ -984,7 +990,7 @@ class RepeatIntervalModal(discord.ui.Modal):
 
 class DaysMenu(discord.ui.View):
     def __init__(self, repeat_view):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.repeat_view = repeat_view
         self.selected_days = []
 
@@ -1345,7 +1351,7 @@ class EmbedEditorView(discord.ui.View):
 
 class MessageTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -1557,7 +1563,7 @@ class TimeSelectModal(discord.ui.Modal):
 
 class NotificationTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -1714,7 +1720,7 @@ class CustomTimesModal(discord.ui.Modal):
 class MentionTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, notification_type,
                  original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -1796,7 +1802,7 @@ class MentionTypeView(discord.ui.View):
                     )
 
             select.callback = user_select_callback
-            view = discord.ui.View(timeout=300)
+            view = discord.ui.View(timeout=VIEW_TIMEOUT)
             view.add_item(select)
 
             await interaction.response.edit_message(
@@ -1835,7 +1841,7 @@ class MentionTypeView(discord.ui.View):
                     )
 
             select.callback = role_select_callback
-            view = discord.ui.View(timeout=300)
+            view = discord.ui.View(timeout=VIEW_TIMEOUT)
             view.add_item(select)
 
             await interaction.response.edit_message(
@@ -2171,7 +2177,7 @@ class BearTrapView(discord.ui.View):
                     super().__init__(label=label, style=discord.ButtonStyle.secondary)
 
                 async def callback(self, interaction: discord.Interaction):
-                    nonlocal notifications, original_notifications, current_page, total_pages
+                    nonlocal notifications, current_page, total_pages
 
                     notifications = original_notifications.copy()
                     search_keywords.clear()
@@ -2260,7 +2266,7 @@ class BearTrapView(discord.ui.View):
                             formatted_repeat = "Every " + ", ".join(day_list[:-1]) + " and " + day_list[-1]
 
                     details_embed = discord.Embed(
-                        title=f"📋 Notification Details",
+                        title="📋 Notification Details",
                         description=(
                             f"**📅 Next Notification date:** {datetime.fromisoformat(selected_notif[15]).strftime('%d/%m/%Y')}\n"
                             f"**⏰ Time:** {selected_notif[3]:02d}:{selected_notif[4]:02d} ({selected_notif[5]})\n"
@@ -2599,7 +2605,7 @@ class BearTrapView(discord.ui.View):
 
 class ChannelSelectView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, message_data, original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour

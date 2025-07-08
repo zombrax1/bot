@@ -97,9 +97,9 @@ class Alliance(commands.Cog):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        except Exception as e:
+        except Exception:
             await interaction.response.send_message(
-                "An error occurred while fetching alliances.", 
+                "An error occurred while fetching alliances.",
                 ephemeral=True
             )
 
@@ -1382,7 +1382,7 @@ class Alliance(commands.Cog):
             except discord.InteractionResponded:
                 pass
                 
-        except Exception as e:
+        except Exception:
             pass
 
     @discord.ui.button(label="Bot Operations", emoji="🤖", style=discord.ButtonStyle.primary, custom_id="bot_operations", row=1)

@@ -1,6 +1,13 @@
 import subprocess
 import sys
 import os
+import importlib
+import importlib.util
+
+VENV_CREATION_TIMEOUT = 300
+PIP_INSTALL_TIMEOUT = 1200
+DOWNLOAD_TIMEOUT = 300
+OCR_INSTALL_TIMEOUT = 600
 
 def is_container() -> bool:
     return os.path.exists("/.dockerenv") or os.path.exists("/var/run/secrets/kubernetes.io")
@@ -34,7 +41,7 @@ if sys.prefix == sys.base_prefix and not should_skip_venv():
     if not os.path.exists(venv_path):
         try:
             print("Attempting to create virtual environment automatically...")
-            subprocess.check_call([sys.executable, "-m", "venv", venv_path], timeout=300)
+            subprocess.check_call([sys.executable, "-m", "venv", venv_path], timeout=VENV_CREATION_TIMEOUT)
             print(f"Virtual environment created at {venv_path}")
 
             if sys.platform == "win32":
@@ -80,8 +87,12 @@ try: # Import or install requests so we can get the requirements
 except ImportError:
     print("Installing requests (required for dependency management)...")
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"], 
-                            timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "requests"],
+            timeout=PIP_INSTALL_TIMEOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         import requests
     except Exception as e:
         print(f"Failed to install requests: {e}")
@@ -174,7 +185,7 @@ def ensure_requirements_file():
         download_url = release_info["download_url"]
         print(f"Downloading from {release_info['source']}: {download_url}")
         
-        download_resp = requests.get(download_url, timeout=300)
+        download_resp = requests.get(download_url, timeout=DOWNLOAD_TIMEOUT)
         if download_resp.status_code == 200:
             with open("temp_package.zip", "wb") as f:
                 f.write(download_resp.content)
@@ -227,14 +238,12 @@ def check_and_install_requirements():
             continue
             
         try:
-            if package_name == "discord.py":
-                import discord
-            elif package_name == "aiohttp-socks":
-                import aiohttp_socks
-            elif package_name == "python-dotenv":
-                import dotenv
-            else:
-                __import__(package_name)
+            module_map = {
+                "discord.py": "discord",
+                "aiohttp-socks": "aiohttp_socks",
+                "python-dotenv": "dotenv",
+            }
+            importlib.import_module(module_map.get(package_name, package_name))
                         
         except ImportError:
             print(f"✗ {package_name} - MISSING")
@@ -251,7 +260,12 @@ def check_and_install_requirements():
                 if package.startswith("ddddocr") and sys.version_info >= (3, 13):
                     cmd.append("--ignore-requires-python")
                 
-                subprocess.check_call(cmd, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.check_call(
+                    cmd,
+                    timeout=PIP_INSTALL_TIMEOUT,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 print(f"✓ {package} installed successfully")
                 
             except Exception as e:
@@ -267,34 +281,24 @@ def check_ocr_dependencies():
         
     missing_ocr = []
     
-    # Test OCR imports
-    try:
-        import numpy
-    except ImportError:
+    # Test OCR imports using importlib to avoid unused imports
+    if importlib.util.find_spec("numpy") is None:
         print("✗ numpy - MISSING")
         missing_ocr.append("numpy")
-    
-    try:
-        import PIL
-    except ImportError:
+
+    if importlib.util.find_spec("PIL") is None:
         print("✗ Pillow - MISSING")
         missing_ocr.append("Pillow")
-    
-    try:
-        import cv2
-    except ImportError:
+
+    if importlib.util.find_spec("cv2") is None:
         print("✗ opencv-python-headless - MISSING")
         missing_ocr.append("opencv-python-headless")
-    
-    try:
-        import onnxruntime
-    except ImportError:
+
+    if importlib.util.find_spec("onnxruntime") is None:
         print("✗ onnxruntime - MISSING")
         missing_ocr.append("onnxruntime")
-    
-    try:
-        import ddddocr
-    except ImportError:
+
+    if importlib.util.find_spec("ddddocr") is None:
         print("✗ ddddocr - MISSING")
         missing_ocr.append("ddddocr==1.5.6")
     
@@ -309,7 +313,7 @@ def check_ocr_dependencies():
                 if package.startswith("ddddocr") and sys.version_info >= (3, 13):
                     cmd.append("--ignore-requires-python")
                 
-                subprocess.check_call(cmd, timeout=600, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.check_call(cmd, timeout=OCR_INSTALL_TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 print(f"✓ {package} installed successfully")
                 
             except Exception as e:
@@ -318,7 +322,7 @@ def check_ocr_dependencies():
     # Test OCR object creation
     try:
         import ddddocr
-        ocr = ddddocr.DdddOcr(show_ad=False)
+        ddddocr.DdddOcr(show_ad=False)
         return True
     except Exception as e:
         print(f"✗ OCR object creation failed: {e}")
@@ -425,7 +429,6 @@ except Exception as e:
     print(Fore.RED + f"Error applying SSL context patch: {e}" + Style.RESET_ALL)
 
 if __name__ == "__main__":
-    import requests
 
     def restart_bot():
         python = sys.executable
@@ -481,12 +484,17 @@ if __name__ == "__main__":
         
             try:
                 if debug:
-                    subprocess.check_call(full_command, timeout=1200)
+                    subprocess.check_call(full_command, timeout=PIP_INSTALL_TIMEOUT)
                 else:
-                    subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.check_call(
+                        full_command,
+                        timeout=PIP_INSTALL_TIMEOUT,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                     
                 success.append(0)
-            except Exception as _:
+            except Exception:
                 success.append(1)
                 
         return sum(success) == 0
@@ -548,7 +556,7 @@ if __name__ == "__main__":
                         
                     print(Fore.YELLOW + f"Downloading update from {source_name}..." + Style.RESET_ALL)
                     safe_remove_file("package.zip")
-                    download_resp = requests.get(download_url, timeout=600)
+                    download_resp = requests.get(download_url, timeout=DOWNLOAD_TIMEOUT * 2)
                     
                     if download_resp.status_code == 200:
                         with open("package.zip", "wb") as f:
@@ -573,7 +581,7 @@ if __name__ == "__main__":
                             try:
                                 if os.path.exists("main.py.bak"):
                                     os.remove("main.py.bak")
-                            except Exception as _:
+                            except Exception:
                                 pass
                                 
                             try:
@@ -585,7 +593,7 @@ if __name__ == "__main__":
                                     if os.path.exists("main.py"):
                                         os.remove("main.py")
                                         print(Fore.YELLOW + "Removed current main.py" + Style.RESET_ALL)
-                                except Exception as _:
+                                except Exception:
                                     print(Fore.RED + "Warning: Could not backup or remove current main.py" + Style.RESET_ALL)
                             
                             try:
@@ -647,7 +655,6 @@ if __name__ == "__main__":
             
     asyncio.run(check_and_update_files())
             
-    import discord
     from discord.ext import commands
     import sqlite3
 
@@ -822,7 +829,7 @@ if __name__ == "__main__":
             if release_info and release_info.get("download_url"):
                 try:
                     print(f"Downloading missing files from {release_info['source']}...")
-                    download_resp = requests.get(release_info["download_url"], timeout=300)
+                    download_resp = requests.get(release_info["download_url"], timeout=DOWNLOAD_TIMEOUT)
                     
                     if download_resp.status_code == 200:
                         with open("temp_recovery.zip", "wb") as f:
@@ -855,6 +862,7 @@ if __name__ == "__main__":
                                 await bot.load_extension(f"cogs.{cog}")
                             except Exception as e:
                                 retry_failed.append(cog)
+                                print(f"Failed to load {cog}: {e}")
                         
                         if retry_failed:
                             print(f"⚠️ {len(retry_failed)} cogs still failed to load: {', '.join(retry_failed)}")

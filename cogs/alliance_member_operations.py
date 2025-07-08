@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import sqlite3
 import aiohttp
 import hashlib
@@ -11,7 +10,7 @@ from datetime import datetime
 import os
 import ssl
 
-SECRET = 'tB87#kPtkxqOS2'
+SECRET = os.getenv('BOT_SECRET', 'tB87#kPtkxqOS2')
 
 class PaginationView(discord.ui.View):
     def __init__(self, chunks: List[discord.Embed], author_id: int):
@@ -1329,7 +1328,7 @@ class AllianceMemberOperations(commands.Cog):
                     log_file.write(f"ERROR: Log record error: {str(e)}\n")
 
             with open(log_file_path, 'a', encoding='utf-8') as log_file:
-                log_file.write(f"\nFinal Results:\n")
+                log_file.write("\nFinal Results:\n")
                 log_file.write(f"Successfully Added: {added_count}\n")
                 log_file.write(f"Failed: {error_count}\n")
                 log_file.write(f"Already Exists: {already_exists_count}\n")
@@ -1431,7 +1430,7 @@ class AllianceMemberOperations(commands.Cog):
             
             return all_alliances, special_alliances, False
                 
-        except Exception as e:
+        except Exception:
             return [], [], False
 
     async def handle_button_interaction(self, interaction: discord.Interaction):

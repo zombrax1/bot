@@ -6,13 +6,14 @@ import ssl
 import time
 import asyncio
 import sqlite3
+import os
 
 class WCommand(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.conn = sqlite3.connect('db/changes.sqlite')
         self.c = self.conn.cursor()
-        self.SECRET = "tB87#kPtkxqOS2"
+        self.SECRET = os.getenv('BOT_SECRET', 'tB87#kPtkxqOS2')
         
         self.level_mapping = {
             31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
