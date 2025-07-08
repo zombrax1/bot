@@ -1446,25 +1446,58 @@ class MemberOperationsView(discord.ui.View):
         self.cog = cog
 
     async def get_admin_alliances(self, user_id, guild_id):
-        self.cog.c_settings.execute("SELECT id, is_initial FROM admin WHERE id = ?", (user_id,))
-        admin = self.cog.c_settings.fetchone()
-        
-        if admin is None:
+        self.cog.c_settings.execute(
+            "SELECT is_initial FROM admin WHERE id = ?", (user_id,)
+        )
+        admin_result = self.cog.c_settings.fetchone()
+
+        if not admin_result:
             return []
-            
-        is_initial = admin[1]
-        
+
+        is_initial = admin_result[0]
+
         if is_initial == 1:
-            self.cog.c.execute("SELECT alliance_id, name FROM alliance_list ORDER BY name")
-        else:
-            self.cog.c.execute("""
-                SELECT alliance_id, name 
-                FROM alliance_list 
-                WHERE discord_server_id = ? 
+            self.cog.c.execute(
+                "SELECT alliance_id, name FROM alliance_list ORDER BY name"
+            )
+            return self.cog.c.fetchall()
+
+        self.cog.c.execute(
+            """
+                SELECT DISTINCT alliance_id, name
+                FROM alliance_list
+                WHERE discord_server_id = ?
                 ORDER BY name
-            """, (guild_id,))
-            
-        return self.cog.c.fetchall()
+            """,
+            (guild_id,)
+        )
+        server_alliances = self.cog.c.fetchall()
+
+        with sqlite3.connect("db/settings.sqlite") as settings_db:
+            cursor = settings_db.cursor()
+            cursor.execute(
+                "SELECT alliances_id FROM adminserver WHERE admin = ?",
+                (user_id,)
+            )
+            special_alliance_ids = cursor.fetchall()
+
+        special_alliances = []
+        if special_alliance_ids:
+            placeholders = ",".join("?" * len(special_alliance_ids))
+            self.cog.c.execute(
+                f"""
+                    SELECT DISTINCT alliance_id, name
+                    FROM alliance_list
+                    WHERE alliance_id IN ({placeholders})
+                    ORDER BY name
+                """,
+                [aid[0] for aid in special_alliance_ids]
+            )
+            special_alliances = self.cog.c.fetchall()
+
+        all_alliances = list({(aid, name) for aid, name in (server_alliances + special_alliances)})
+
+        return all_alliances
 
     @discord.ui.button(label="Add Member", emoji="➕", style=discord.ButtonStyle.primary, custom_id="add_member")
     async def add_member_button(self, interaction: discord.Interaction, button: discord.ui.Button):
