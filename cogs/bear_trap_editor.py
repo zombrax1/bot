@@ -1,10 +1,8 @@
-from logging import exception
 import discord
 from discord.ext import commands
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 import re
-import traceback
 
 def format_repeat_interval(repeat_minutes, notification_id=None) -> str:
     if repeat_minutes == 0:
@@ -356,7 +354,7 @@ class PlainEditorView(discord.ui.View):
                 cursor.execute("SELECT weekday FROM notification_days WHERE notification_id = ?", (self.notification_id,))
                 weekday_value = cursor.fetchone()
                 if weekday_value:
-                    self.weekdays = row[0]
+                    self.weekdays = weekday_value[0]
                 conn.close()
             except Exception as e:
                 print(f"Failed to load weekdays: {e}")

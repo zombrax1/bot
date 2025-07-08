@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands
 import aiohttp
 import hashlib
 import time
@@ -13,7 +12,7 @@ from aiohttp_socks import ProxyConnector
 import traceback
 import ssl
 
-SECRET = 'tB87#kPtkxqOS2'
+SECRET = os.getenv('BOT_SECRET', 'tB87#kPtkxqOS2')
 
 level_mapping = {
     31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
@@ -102,7 +101,7 @@ class Control(commands.Cog):
                         return await response.json()
                     else:
                         return response.status
-        except Exception as e:
+        except Exception:
             return None
 
     async def process_user(self, fid, old_nickname, old_furnace_lv, old_stove_lv_content, old_kid, proxies):
@@ -354,13 +353,11 @@ class Control(commands.Cog):
                 print(f"[CONTROL] Starting control for alliance ID: {alliance_id}")
                 
                 self.cursor_alliance.execute("""
-                    SELECT name FROM alliance_list 
+                    SELECT name FROM alliance_list
                     WHERE alliance_id = ?
                 """, (alliance_id,))
-                alliance_name = self.cursor_alliance.fetchone()[0]
-                
+
                 self.cursor_users.execute("SELECT COUNT(*) FROM users WHERE alliance = ?", (alliance_id,))
-                member_count = self.cursor_users.fetchone()[0]
                 
                 self.current_control = asyncio.create_task(self.check_agslist(channel, alliance_id))
                 await self.current_control
@@ -502,8 +499,6 @@ class Control(commands.Cog):
     @tasks.loop(minutes=1)
     async def monitor_alliance_changes(self):
         try:
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
             async with self.db_lock:
                 self.cursor_alliance.execute("SELECT alliance_id, channel_id, interval FROM alliancesettings")
                 current_settings = {

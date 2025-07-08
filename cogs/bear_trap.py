@@ -9,6 +9,9 @@ import json
 import traceback
 import time
 
+VIEW_TIMEOUT = 300  # default timeout for UI views
+CHANNEL_WARNING_INTERVAL = 300  # seconds between channel unavailable warnings
+
 class BearTrap(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -20,7 +23,7 @@ class BearTrap(commands.Cog):
 
         # Rate limiting for channel unavailable warnings
         self.channel_warning_timestamps = {}
-        self.channel_warning_interval = 300
+        self.channel_warning_interval = CHANNEL_WARNING_INTERVAL
 
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS bear_notifications (
@@ -234,7 +237,6 @@ class BearTrap(commands.Cog):
                 """)
                 notifications = self.cursor.fetchall()
 
-                now = datetime.now(pytz.UTC)
                 for notification in notifications:
                     try:
                         await self.process_notification(notification)
@@ -253,12 +255,6 @@ class BearTrap(commands.Cog):
              notification_type, mention_type, repeat_enabled, repeat_minutes,
              is_enabled, created_at, created_by, last_notification,
              next_notification) = notification
-
-            weekly_repeat_days = []
-            if repeat_enabled and repeat_minutes == 0:
-                self.cursor.execute("SELECT weekday FROM notification_days WHERE notification_id = ?", (id,))
-                weekly_repeat_days = [row[0] for row in self.cursor.fetchall()]
-
 
             if not is_enabled:
                 return
@@ -756,7 +752,7 @@ class BearTrap(commands.Cog):
 class RepeatOptionView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, description, channel_id, notification_type,
                  mention_type, original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -784,7 +780,7 @@ class RepeatOptionView(discord.ui.View):
 
     async def save_notification(self, interaction, repeat, repeat_minutes=0, interval_text=None, selected_weekdays=None):
         try:
-            notification_id = await self.cog.save_notification(
+            await self.cog.save_notification(
                 guild_id=interaction.guild_id,
                 channel_id=self.channel_id,
                 start_date=self.start_date,
@@ -984,7 +980,7 @@ class RepeatIntervalModal(discord.ui.Modal):
 
 class DaysMenu(discord.ui.View):
     def __init__(self, repeat_view):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.repeat_view = repeat_view
         self.selected_days = []
 
@@ -1345,7 +1341,7 @@ class EmbedEditorView(discord.ui.View):
 
 class MessageTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -1557,7 +1553,7 @@ class TimeSelectModal(discord.ui.Modal):
 
 class NotificationTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -1714,7 +1710,7 @@ class CustomTimesModal(discord.ui.Modal):
 class MentionTypeView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, message_data, channel_id, notification_type,
                  original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour
@@ -1796,7 +1792,7 @@ class MentionTypeView(discord.ui.View):
                     )
 
             select.callback = user_select_callback
-            view = discord.ui.View(timeout=300)
+            view = discord.ui.View(timeout=VIEW_TIMEOUT)
             view.add_item(select)
 
             await interaction.response.edit_message(
@@ -1835,7 +1831,7 @@ class MentionTypeView(discord.ui.View):
                     )
 
             select.callback = role_select_callback
-            view = discord.ui.View(timeout=300)
+            view = discord.ui.View(timeout=VIEW_TIMEOUT)
             view.add_item(select)
 
             await interaction.response.edit_message(
@@ -2171,7 +2167,7 @@ class BearTrapView(discord.ui.View):
                     super().__init__(label=label, style=discord.ButtonStyle.secondary)
 
                 async def callback(self, interaction: discord.Interaction):
-                    nonlocal notifications, original_notifications, current_page, total_pages
+                    nonlocal notifications, current_page, total_pages
 
                     notifications = original_notifications.copy()
                     search_keywords.clear()
@@ -2260,7 +2256,7 @@ class BearTrapView(discord.ui.View):
                             formatted_repeat = "Every " + ", ".join(day_list[:-1]) + " and " + day_list[-1]
 
                     details_embed = discord.Embed(
-                        title=f"📋 Notification Details",
+                        title="📋 Notification Details",
                         description=(
                             f"**📅 Next Notification date:** {datetime.fromisoformat(selected_notif[15]).strftime('%d/%m/%Y')}\n"
                             f"**⏰ Time:** {selected_notif[3]:02d}:{selected_notif[4]:02d} ({selected_notif[5]})\n"
@@ -2599,7 +2595,7 @@ class BearTrapView(discord.ui.View):
 
 class ChannelSelectView(discord.ui.View):
     def __init__(self, cog, start_date, hour, minute, timezone, message_data, original_message):
-        super().__init__(timeout=300)
+        super().__init__(timeout=VIEW_TIMEOUT)
         self.cog = cog
         self.start_date = start_date
         self.hour = hour

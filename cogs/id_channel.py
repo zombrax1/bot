@@ -10,7 +10,7 @@ import aiohttp
 import ssl
 from discord.ext import tasks
 
-SECRET = "tB87#kPtkxqOS2"
+SECRET = os.getenv('BOT_SECRET', 'tB87#kPtkxqOS2')
 
 class IDChannel(commands.Cog):
     def __init__(self, bot):
@@ -143,7 +143,7 @@ class IDChannel(commands.Cog):
             if not self.check_channels_loop.is_running():
                 self.check_channels_loop.start()
 
-        except Exception as e:
+        except Exception:
             pass
 
     @commands.Cog.listener()
@@ -175,7 +175,7 @@ class IDChannel(commands.Cog):
             fid = int(content)
             await self.process_fid(message, fid, alliance_id)
 
-        except Exception as e:
+        except Exception:
             await message.add_reaction('❌')
 
     async def process_fid(self, message, fid, alliance_id):
@@ -277,7 +277,7 @@ class IDChannel(commands.Cog):
                                         furnace_level_name = f"Level {furnace_lv}"
 
                                     success_embed = discord.Embed(
-                                        title=f"✅ Member Successfully Added",
+                                        title="✅ Member Successfully Added",
                                         description=(
                                             "━━━━━━━━━━━━━━━━━━━━━━\n"
                                             f"**👤 Name:** `{nickname}`\n"
@@ -313,7 +313,7 @@ class IDChannel(commands.Cog):
                                     await message.reply("No player found for this FID!", delete_after=10)
                                     return
 
-                except Exception as e:
+                except Exception:
                     if attempt < max_retries - 1:
                         continue
                     else:
@@ -321,7 +321,7 @@ class IDChannel(commands.Cog):
                         await message.reply("An error occurred during the process!", delete_after=10)
                         return
 
-        except Exception as e:
+        except Exception:
             await message.add_reaction('❌')
             await message.reply("An error occurred during the process!", delete_after=10)
 
@@ -373,7 +373,7 @@ class IDChannel(commands.Cog):
                     fid = int(content)
                     await self.process_fid(message, fid, alliance_id)
 
-        except Exception as e:
+        except Exception:
             pass
 
     async def show_id_channel_menu(self, interaction: discord.Interaction):
@@ -414,7 +414,7 @@ class IDChannel(commands.Cog):
             except discord.InteractionResponded:
                 pass
                 
-        except Exception as e:
+        except Exception:
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     "❌ An error occurred. Please try again.",
@@ -499,7 +499,7 @@ class IDChannelView(discord.ui.View):
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        except Exception as e:
+        except Exception:
             await interaction.response.send_message(
                 "❌ An error occurred. Please try again.",
                 ephemeral=True
@@ -590,7 +590,7 @@ class IDChannelView(discord.ui.View):
                         else:
                             await select_interaction.message.edit(embed=success_embed, view=None)
                             
-                    except Exception as e:
+                    except Exception:
                         error_embed = discord.Embed(
                             title="❌ Error",
                             description="An error occurred while deleting the channel.",
@@ -617,7 +617,7 @@ class IDChannelView(discord.ui.View):
                 ephemeral=True
             )
 
-        except Exception as e:
+        except Exception:
             await interaction.response.send_message(
                 "❌ An error occurred. Please try again.",
                 ephemeral=True
@@ -718,7 +718,7 @@ class IDChannelView(discord.ui.View):
                                     color=discord.Color.red()
                                 )
                                 await channel_interaction.response.edit_message(embed=error_embed, view=None)
-                            except Exception as e:
+                            except Exception:
                                 error_embed = discord.Embed(
                                     title="❌ Error",
                                     description="An error occurred while creating the channel.",
@@ -752,7 +752,7 @@ class IDChannelView(discord.ui.View):
                 ephemeral=True
             )
 
-        except Exception as e:
+        except Exception:
             await interaction.response.send_message(
                 "❌ An error occurred. Please try again.",
                 ephemeral=True
@@ -775,7 +775,7 @@ class IDChannelView(discord.ui.View):
                     "❌ Other Features module not found.",
                     ephemeral=True
                 )
-        except Exception as e:
+        except Exception:
             await interaction.response.send_message(
                 "❌ An error occurred while returning to Other Features menu.",
                 ephemeral=True
