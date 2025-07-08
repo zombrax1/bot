@@ -11,7 +11,7 @@ from datetime import datetime
 import os
 import ssl
 
-SECRET = 'tB87#kPtkxqOS2'
+SECRET = os.getenv('BOT_SECRET', 'tB87#kPtkxqOS2')
 
 class PaginationView(discord.ui.View):
     def __init__(self, chunks: List[discord.Embed], author_id: int):

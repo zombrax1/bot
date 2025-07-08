@@ -3,11 +3,7 @@
 # Version 2 - now with ddddocr
 
 import os
-import warnings
-import base64
-import io
 import time
-import traceback
 import logging
 import logging.handlers
 
@@ -95,7 +91,6 @@ class GiftCaptchaSolver:
             self.logger.info("DdddOcr object created. Performing test classification...")
             try:
                 from PIL import Image
-                import numpy as np
                 dummy_img = Image.new('RGB', (60, 30), color = 'black')
                 import io
                 img_byte_arr = io.BytesIO()
