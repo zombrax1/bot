@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import os
 import sqlite3
 import asyncio
@@ -48,7 +47,7 @@ class BotOperations(commands.Cog):
             
             self.settings_db.commit()
                 
-        except Exception as e:
+        except Exception:
             pass
 
     def __del__(self):
@@ -183,7 +182,7 @@ class BotOperations(commands.Cog):
                                 try:
                                     user = await self.bot.fetch_user(admin_id)
                                     admin_name = f"{user.name} ({admin_id})"
-                                except Exception as e:
+                                except Exception:
                                     admin_name = f"Unknown User ({admin_id})"
                                 
                                 admin_options.append(
@@ -345,13 +344,13 @@ class BotOperations(commands.Cog):
                                     view=admin_view,
                                     ephemeral=True
                                 )
-                            except Exception as e:
+                            except Exception:
                                 await interaction.followup.send(
                                     "An error occurred while sending the initial message.",
                                     ephemeral=True
                                 )
 
-                    except Exception as e:
+                    except Exception:
                         try:
                             await interaction.response.send_message(
                                 "An error occurred while processing your request.",
@@ -415,7 +414,7 @@ class BotOperations(commands.Cog):
                                 embed=None
                             )
 
-                    except Exception as e:
+                    except Exception:
                         if not interaction.response.is_done():
                             await interaction.response.send_message(
                                 "❌ An error occurred while adding an administrator.",
@@ -515,7 +514,7 @@ class BotOperations(commands.Cog):
                                     user = await self.bot.fetch_user(selected_admin_id)
                                     admin_name = user.name
                                     avatar_url = user.display_avatar.url
-                                except Exception as e:
+                                except Exception:
                                     admin_name = f"Bilinmeyen Kullanıcı ({selected_admin_id})"
                                     avatar_url = None
 
@@ -585,7 +584,7 @@ class BotOperations(commands.Cog):
                                             embed=success_embed,
                                             view=None
                                         )
-                                    except Exception as e:
+                                    except Exception:
                                         await button_interaction.response.send_message(
                                             "❌ An error occurred while deleting the administrator.",
                                             ephemeral=True
@@ -613,7 +612,7 @@ class BotOperations(commands.Cog):
                                     view=confirm_view
                                 )
 
-                            except Exception as e:
+                            except Exception:
                                 await select_interaction.response.send_message(
                                     "❌ An error occurred during processing.",
                                     ephemeral=True
@@ -888,7 +887,6 @@ class BotOperations(commands.Cog):
                     try:
                         user = await self.bot.fetch_user(admin_id)
                         admin_name = user.name
-                        admin_avatar = user.display_avatar.url
 
                         self.settings_cursor.execute("""
                             SELECT alliances_id 
@@ -1042,7 +1040,7 @@ class BotOperations(commands.Cog):
                     if update_notes:
                         notes_text = "\n".join([f"• {note.lstrip('- *•').strip()}" for note in update_notes[:10]])
                         if len(update_notes) > 10:
-                            notes_text += f"\n• ... and more!"
+                            notes_text += "\n• ... and more!"
                         
                         main_embed.add_field(
                             name="Release Notes",
@@ -1191,7 +1189,7 @@ class BotOperations(commands.Cog):
             """, (admin_id, alliance_id))
             self.settings_db.commit()
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     async def check_for_updates(self):

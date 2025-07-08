@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 import sqlite3
-from datetime import datetime
 from .alliance_member_operations import AllianceSelectView
 
 class Changes(commands.Cog):
@@ -173,7 +172,7 @@ class Changes(commands.Cog):
                 current_level = user_info[1] if user_info else 0
 
             embed = discord.Embed(
-                title=f"🔥 Furnace Level History",
+                title="🔥 Furnace Level History",
                 description=(
                     f"**Player:** `{nickname}`\n"
                     f"**FID:** `{fid}`\n"
@@ -227,7 +226,7 @@ class Changes(commands.Cog):
                 current_level = user_info[1] if user_info else 0
 
             embed = discord.Embed(
-                title=f"📝 Nickname History",
+                title="📝 Nickname History",
                 description=(
                     f"**Player:** `{nickname}`\n"
                     f"**FID:** `{fid}`\n"

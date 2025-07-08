@@ -3,13 +3,13 @@ from discord.ext import commands
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import importlib
 import hashlib
 import json
 from datetime import datetime
 import sqlite3
 from discord.ext import tasks
 import asyncio
-import sys
 import base64
 import re
 import os
@@ -296,7 +296,7 @@ class GiftOperations(commands.Cog):
                             if not self.captcha_solver.is_initialized:
                                 self.logger.error("DdddOcr solver FAILED to initialize in on_ready.")
                                 self.captcha_solver = None
-                        except Exception as e:
+                        except Exception:
                             self.logger.exception("Failed to initialize Captcha Solver in on_ready.")
                             self.captcha_solver = None
                     else:
@@ -368,7 +368,7 @@ class GiftOperations(commands.Cog):
                 self.logger.info(f"GiftOps: [on_message] Running API sync for channel {message.channel.id}")
                 await self.api.validate_and_clean_giftcode_file()
                 await self.api.sync_with_api()
-                self.logger.info(f"GiftOps: [on_message] API sync complete.")
+                self.logger.info("GiftOps: [on_message] API sync complete.")
             except Exception as e:
                 self.logger.exception(f"Error during API sync triggered by on_message: {str(e)}")
 
@@ -426,7 +426,7 @@ class GiftOperations(commands.Cog):
                         await self.use_giftcode_for_alliance(alliance[0], giftcode)
 
                 else:
-                    self.logger.info(f"GiftOps: [on_message] No alliances configured for auto-use.")
+                    self.logger.info("GiftOps: [on_message] No alliances configured for auto-use.")
 
                 reply_embed = discord.Embed(title="✅ Gift Code Added", color=discord.Color.green())
                 reply_embed.description=(
@@ -868,7 +868,6 @@ class GiftOperations(commands.Cog):
 
     @tasks.loop(seconds=1800)
     async def check_channels_loop(self):
-        log_file_path = os.path.join(self.log_directory, 'giftlog.txt')
         loop_start_time = datetime.now()
         self.logger.info(f"\nGiftOps: check_channels_loop running at {loop_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -1008,7 +1007,7 @@ class GiftOperations(commands.Cog):
                     processed_code_statuses[code] = "ERROR"
 
             # Step 5: Apply reactions based on status
-            self.logger.info(f"GiftOps: [Loop] Applying reactions to messages...")
+            self.logger.info("GiftOps: [Loop] Applying reactions to messages...")
             for code, status in processed_code_statuses.items():
                 if code not in code_message_map: 
                     continue
@@ -1131,11 +1130,10 @@ class GiftOperations(commands.Cog):
                     else:
                         solver_status_msg = "Error (Instance missing flags)"
                 else:
-                    try:
-                        import ddddocr
+                    if importlib.util.find_spec("ddddocr") is not None:
                         ddddocr_available = True
                         solver_status_msg = "Disabled or Init Failed"
-                    except ImportError:
+                    else:
                         ddddocr_available = False
                         solver_status_msg = "ddddocr library missing"
 
@@ -1543,7 +1541,6 @@ class GiftOperations(commands.Cog):
                 alliances_with_counts.append((alliance_id, name, member_count))
 
         self.cursor.execute("SELECT alliance_id, channel_id FROM giftcode_channel")
-        current_channels = dict(self.cursor.fetchall())
 
         alliance_embed = discord.Embed(
             title="📢 Gift Code Channel Setup",
@@ -1836,7 +1833,7 @@ class GiftOperations(commands.Cog):
                                     view=None
                                 )
                                 
-                            except Exception as e:
+                            except Exception:
                                 await button_interaction.response.send_message(
                                     "❌ An error occurred while deleting the gift code.",
                                     ephemeral=True
@@ -1897,14 +1894,14 @@ class GiftOperations(commands.Cog):
             initial_embed = discord.Embed(
                 title="🗑️ Delete Gift Code",
                 description=(
-                    f"**Instructions**\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"1️⃣ Select a gift code from the menu below\n"
-                    f"2️⃣ Confirm your selection\n"
-                    f"3️⃣ The code will be permanently deleted\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "**Instructions**\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "1️⃣ Select a gift code from the menu below\n"
+                    "2️⃣ Confirm your selection\n"
+                    "3️⃣ The code will be permanently deleted\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
                 ),
-                color=discord.Color.blue()
+                color=discord.Color.blue(),
             )
 
             await interaction.response.send_message(
@@ -3542,7 +3539,7 @@ class OCRSettingsView(discord.ui.View):
 
         except ValueError:
             await interaction.followup.send("❌ Invalid selection value for image saving.", ephemeral=True)
-        except Exception as e:
+        except Exception:
             self.cog.logger.exception("Error processing image save selection in OCRSettingsView.")
             await interaction.followup.send("❌ An error occurred while updating image saving settings.", ephemeral=True)
         
