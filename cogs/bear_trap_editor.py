@@ -3,6 +3,11 @@ from discord.ext import commands
 import sqlite3
 from datetime import datetime
 import re
+import os
+import uuid
+import asyncio
+
+IMAGE_UPLOAD_DIR = "notification_images"
 
 def format_repeat_interval(repeat_minutes, notification_id=None) -> str:
     if repeat_minutes == 0:
@@ -262,6 +267,32 @@ class EmbedDataView(discord.ui.View):
                 required=False
             )
         )
+
+    @discord.ui.button(label="Upload Image", style=discord.ButtonStyle.secondary)
+    async def upload_image(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Please upload an image in your next message.",
+            ephemeral=True
+        )
+
+        def check(m: discord.Message):
+            return m.author.id == interaction.user.id and m.channel == interaction.channel and m.attachments
+
+        try:
+            message = await self.cog.bot.wait_for('message', timeout=30.0, check=check)
+            attachment = message.attachments[0]
+            os.makedirs(IMAGE_UPLOAD_DIR, exist_ok=True)
+            file_ext = os.path.splitext(attachment.filename)[1]
+            filename = f"{uuid.uuid4().hex}{file_ext}"
+            file_path = os.path.join(IMAGE_UPLOAD_DIR, filename)
+            await attachment.save(file_path)
+            await message.delete()
+            self.image_url = file_path
+            await self.cog.update_embed_notification(self)
+            await self.update_embed_view(interaction)
+            await interaction.followup.send("✅ Image uploaded.", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ Timed out waiting for image.", ephemeral=True)
 
     @discord.ui.button(label="Add Thumbnail", style=discord.ButtonStyle.secondary)
     async def edit_thumbnail_url(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -818,6 +849,18 @@ class PlainEditorView(discord.ui.View):
 class NotificationEditor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        os.makedirs(IMAGE_UPLOAD_DIR, exist_ok=True)
+
+    @discord.app_commands.command(name="list_images", description="List uploaded notification images")
+    async def list_images(self, interaction: discord.Interaction):
+        files = os.listdir(IMAGE_UPLOAD_DIR)
+        if not files:
+            await interaction.response.send_message("No images uploaded.", ephemeral=True)
+            return
+
+        file_list = "\n".join(files)
+        embed = discord.Embed(title="Stored Images", description=file_list, color=discord.Color.blue())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def start_edit_process(self, interaction: discord.Interaction, notification_id: int,
                                  original_message: discord.Message = None):

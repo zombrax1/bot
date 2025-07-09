@@ -9,6 +9,8 @@ import json
 import traceback
 import time
 
+IMAGE_UPLOAD_DIR = "notification_images"
+
 VIEW_TIMEOUT = 300  # default timeout for UI views
 CHANNEL_WARNING_INTERVAL = 300  # seconds between channel unavailable warnings
 
@@ -18,6 +20,7 @@ class BearTrap(commands.Cog):
 
         self.db_path = 'db/beartime.sqlite'
         os.makedirs('db', exist_ok=True)
+        os.makedirs(IMAGE_UPLOAD_DIR, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
@@ -442,17 +445,28 @@ class BearTrap(commands.Cog):
                                         description = description.replace("@tag", mention_text)
                                     embed.description = description
 
+                                files = []
                                 image_url = embed_data.get("image_url", "")
-                                if image_url and isinstance(image_url,
-                                                            str) and image_url.strip() and image_url.startswith(
-                                        ('http://', 'https://')):
-                                    embed.set_image(url=image_url)
+                                if image_url and isinstance(image_url, str) and image_url.strip():
+                                    if image_url.startswith(('http://', 'https://')):
+                                        embed.set_image(url=image_url)
+                                    else:
+                                        try:
+                                            files.append(discord.File(image_url, filename=os.path.basename(image_url)))
+                                            embed.set_image(url=f"attachment://{os.path.basename(image_url)}")
+                                        except Exception as e:
+                                            print(f"Error attaching image: {e}")
 
                                 thumbnail_url = embed_data.get("thumbnail_url", "")
-                                if thumbnail_url and isinstance(thumbnail_url,
-                                                                str) and thumbnail_url.strip() and thumbnail_url.startswith(
-                                        ('http://', 'https://')):
-                                    embed.set_thumbnail(url=thumbnail_url)
+                                if thumbnail_url and isinstance(thumbnail_url, str) and thumbnail_url.strip():
+                                    if thumbnail_url.startswith(('http://', 'https://')):
+                                        embed.set_thumbnail(url=thumbnail_url)
+                                    else:
+                                        try:
+                                            files.append(discord.File(thumbnail_url, filename=os.path.basename(thumbnail_url)))
+                                            embed.set_thumbnail(url=f"attachment://{os.path.basename(thumbnail_url)}")
+                                        except Exception as e:
+                                            print(f"Error attaching thumbnail: {e}")
 
                                 footer_text = embed_data.get("footer", "")
                                 if footer_text and isinstance(footer_text, str):
@@ -482,7 +496,10 @@ class BearTrap(commands.Cog):
                                             mention_text = mention_text.replace("%t", time_text)
                                             mention_text = mention_text.replace("{time}", time_text)
                                             await channel.send(mention_text)
-                                    await channel.send(embed=embed)
+                                    if files:
+                                        await channel.send(embed=embed, files=files)
+                                    else:
+                                        await channel.send(embed=embed)
                                 else:
                                     if rounded_time > 0:
                                         await channel.send(
