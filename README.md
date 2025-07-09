@@ -1,5 +1,10 @@
 # Whiteout Survival Discord Bot
 
+**Update July 09, 2025**
+
+- Restricted server admin alliance views to show only alliances from the current server or those explicitly added for them.
+- Fixed admin alliance visibility so permissions are applied correctly.
+
 Whiteout Survival Discord Bot that supports alliance management, event reminders, gift code redemption and more.
 
 This guide explains how to manually update your existing bot installation so that gift code redemption works again.
@@ -8,7 +13,9 @@ This guide explains how to manually update your existing bot installation so tha
 
 This bot is a new, actively maintained version of the original bot created by Reloisback.
 
-## 🖥️ System Requirements & Prerequisites
+## Installation
+
+### 🖥️ System Requirements & Prerequisites
 
 After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), system requirements has significantly decreased from patch v1.0.5. Here are the following requirements:
 
@@ -105,11 +112,26 @@ Upgrading from the "Relo/Patch Versions" before 1.0.0:
 *   The CAPTCHA solver should now be active. It has approximately 80% accuracy at the moment and is not as resource-intensive as EasyOCR.
 *   In case any IDs end up with an Error result, you can always re-run the redemption for the same gift code and alliance again to hopefully redeem it successfully this time.
 *   You can configure saving CAPTCHA images and other OCR settings via the bot's `/settings` -> Gift Code Operations -> CAPTCHA Settings menu.
-*   You can monitor the bot's logs (`log/giftlog.txt` and `log/gift_ops.log`) for CAPTCHA-related messages during gift code processing.
+
+## Logs
+
+The bot records its activity in the `log/` directory. Key files include:
+- `log/giftlog.txt` – details each gift code redemption attempt
+- `log/gift_ops.log` – general operations log
+
+Use these logs to troubleshoot issues or confirm successful redemptions.
 
 If you encounter issues with this patch, reach out to the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
 
 ---
+
+## Features
+
+- Self-hosted GitLab fallback for updates
+- Automatic virtual environment management
+- Built-in backup options (Discord DM or server files)
+
+See [Patch Notes](#-patch-notes) for complete details.
 
 ## 🛠️ Patch Notes 
 
