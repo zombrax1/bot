@@ -156,16 +156,37 @@ class EmbedDataView(discord.ui.View):
             description=self.embed_description,
             color=self.color,
         )
+        files: list[discord.File] = []
+
         if self.footer:
             embed.set_footer(text=self.footer)
         if self.author:
             embed.set_author(name=self.author)
-        if self.image_url:
-            embed.set_image(url=self.image_url)
-        if self.thumbnail_url:
-            embed.set_thumbnail(url=self.thumbnail_url)
 
-        await self.message.edit(content=self.mention_message, embed=embed, view=self)
+        if self.image_url:
+            if self.image_url.startswith(("http://", "https://")):
+                embed.set_image(url=self.image_url)
+            else:
+                try:
+                    files.append(discord.File(self.image_url, filename=os.path.basename(self.image_url)))
+                    embed.set_image(url=f"attachment://{os.path.basename(self.image_url)}")
+                except Exception as e:
+                    print(f"Error attaching image: {e}")
+
+        if self.thumbnail_url:
+            if self.thumbnail_url.startswith(("http://", "https://")):
+                embed.set_thumbnail(url=self.thumbnail_url)
+            else:
+                try:
+                    files.append(discord.File(self.thumbnail_url, filename=os.path.basename(self.thumbnail_url)))
+                    embed.set_thumbnail(url=f"attachment://{os.path.basename(self.thumbnail_url)}")
+                except Exception as e:
+                    print(f"Error attaching thumbnail: {e}")
+
+        if files:
+            await self.message.edit(content=self.mention_message, embed=embed, view=self, attachments=files)
+        else:
+            await self.message.edit(content=self.mention_message, embed=embed, view=self)
 
     @discord.ui.button(label="Title", style=discord.ButtonStyle.primary)
     async def edit_title(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -306,6 +327,32 @@ class EmbedDataView(discord.ui.View):
                 required=False
             )
         )
+
+    @discord.ui.button(label="Upload Thumbnail", style=discord.ButtonStyle.secondary)
+    async def upload_thumbnail(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Please upload a thumbnail image in your next message.",
+            ephemeral=True
+        )
+
+        def check(m: discord.Message):
+            return m.author.id == interaction.user.id and m.channel == interaction.channel and m.attachments
+
+        try:
+            message = await self.cog.bot.wait_for('message', timeout=30.0, check=check)
+            attachment = message.attachments[0]
+            os.makedirs(IMAGE_UPLOAD_DIR, exist_ok=True)
+            file_ext = os.path.splitext(attachment.filename)[1]
+            filename = f"{uuid.uuid4().hex}{file_ext}"
+            file_path = os.path.join(IMAGE_UPLOAD_DIR, filename)
+            await attachment.save(file_path)
+            await message.delete()
+            self.thumbnail_url = file_path
+            await self.cog.update_embed_notification(self)
+            await self.update_embed_view(interaction)
+            await interaction.followup.send("✅ Thumbnail uploaded.", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ Timed out waiting for thumbnail.", ephemeral=True)
 
     @discord.ui.button(label="Edit Notification settings", style=discord.ButtonStyle.primary, emoji="⚙️")
     async def notification_setting(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -891,22 +938,37 @@ class NotificationEditor(commands.Cog):
                 description=embed_description,
                 color=color,
             )
+            files: list[discord.File] = []
             if footer:
                 embed.set_footer(text=footer)
             if author:
                 embed.set_author(name=author)
             if image_url:
-                embed.set_image(url=image_url)
+                if image_url.startswith(("http://", "https://")):
+                    embed.set_image(url=image_url)
+                else:
+                    try:
+                        files.append(discord.File(image_url, filename=os.path.basename(image_url)))
+                        embed.set_image(url=f"attachment://{os.path.basename(image_url)}")
+                    except Exception as e:
+                        print(f"Error attaching image: {e}")
             if thumbnail_url:
-                embed.set_thumbnail(url=thumbnail_url)
+                if thumbnail_url.startswith(("http://", "https://")):
+                    embed.set_thumbnail(url=thumbnail_url)
+                else:
+                    try:
+                        files.append(discord.File(thumbnail_url, filename=os.path.basename(thumbnail_url)))
+                        embed.set_thumbnail(url=f"attachment://{os.path.basename(thumbnail_url)}")
+                    except Exception as e:
+                        print(f"Error attaching thumbnail: {e}")
 
             await interaction.response.defer()
             if original_message:
-                await original_message.edit(content=mention_message, embed=embed, view=view)
+                await original_message.edit(content=mention_message, embed=embed, view=view, attachments=files if files else [])
                 message = original_message
             else:
                 message = await interaction.followup.send(content=mention_message, embed=embed, view=view,
-                                                          ephemeral=True)
+                                                          ephemeral=True, files=files or None)
 
         elif "PLAIN_MESSAGE" in description:
             try:
