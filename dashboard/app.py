@@ -1,6 +1,8 @@
 import sqlite3
 from flask import Flask, jsonify
 
+HOME_ROUTES = ["/alliances", "/giftcodes/stats", "/notifications"]
+
 ALLIANCE_DB_PATH = "db/alliance.sqlite"
 GIFT_DB_PATH = "db/giftcode.sqlite"
 NOTIFICATION_DB_PATH = "db/beartime.sqlite"
@@ -14,6 +16,11 @@ def _get_connection(path: str) -> sqlite3.Connection:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
+    @app.route("/")
+    def index():
+        """Simple JSON message listing available routes."""
+        return jsonify({"message": "Dashboard is running", "routes": HOME_ROUTES})
 
     @app.route("/alliances")
     def list_alliances():
