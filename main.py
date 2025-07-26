@@ -747,15 +747,23 @@ if __name__ == "__main__":
 
         with connections["conn_giftcode"] as conn_giftcode:
             conn_giftcode.execute("""CREATE TABLE IF NOT EXISTS gift_codes (
-                giftcode TEXT PRIMARY KEY, 
+                giftcode TEXT PRIMARY KEY,
                 date TEXT
             )""")
-            
+
             conn_giftcode.execute("""CREATE TABLE IF NOT EXISTS user_giftcodes (
-                fid INTEGER, 
-                giftcode TEXT, 
-                status TEXT, 
+                fid INTEGER,
+                giftcode TEXT,
+                status TEXT,
                 PRIMARY KEY (fid, giftcode),
+                FOREIGN KEY (giftcode) REFERENCES gift_codes (giftcode)
+            )""")
+
+            conn_giftcode.execute("""CREATE TABLE IF NOT EXISTS claim_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fid INTEGER,
+                giftcode TEXT,
+                claim_time TEXT,
                 FOREIGN KEY (giftcode) REFERENCES gift_codes (giftcode)
             )""")
 
