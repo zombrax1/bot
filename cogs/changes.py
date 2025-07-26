@@ -392,6 +392,97 @@ class Changes(commands.Cog):
                 ephemeral=True
             )
 
+    @discord.app_commands.command(name="track", description="Track player's nickname history")
+    async def track(self, interaction: discord.Interaction):
+        try:
+            admin_info = await self.get_admin_info(interaction.user.id)
+            if not admin_info:
+                await interaction.response.send_message(
+                    "❌ You don't have permission to perform this action.",
+                    ephemeral=True
+                )
+                return
+
+            available_alliances = await self.get_admin_alliances(interaction.user.id, interaction.guild_id)
+            if not available_alliances[0]:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="❌ No Available Alliance",
+                        description="No alliance found that you have access to.",
+                        color=discord.Color.red()
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            alliances, special_alliances, _ = available_alliances
+            alliances_with_counts = []
+            for alliance_id, name in alliances:
+                with sqlite3.connect('db/users.sqlite') as users_db:
+                    cursor = users_db.cursor()
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM users WHERE alliance = ?",
+                        (alliance_id,)
+                    )
+                    member_count = cursor.fetchone()[0]
+                    alliances_with_counts.append((alliance_id, name, member_count))
+
+            special_alliance_text = ""
+            if special_alliances:
+                special_alliance_text = "\n\n**Special Access Alliances**\n"
+                special_alliance_text += "━━━━━━━━━━━━━━━━━━━━━━\n"
+                for _, name in special_alliances:
+                    special_alliance_text += f"🔸 {name}\n"
+                special_alliance_text += "━━━━━━━━━━━━━━━━━━━━━━"
+
+            select_embed = discord.Embed(
+                title="📝 Alliance Selection - Nickname Changes",
+                description=(
+                    "Select an alliance to view nickname changes:\n\n"
+                    "**Permission Details**\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 **Access Level:** `{'Global Admin' if admin_info[1] == 1 else 'Server Admin'}`\n"
+                    f"🔍 **Access Type:** `{'All Alliances' if admin_info[1] == 1 else 'Server + Special Access'}`\n"
+                    f"📊 **Available Alliances:** `{len(alliances)}`\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━"
+                    f"{special_alliance_text}"
+                ),
+                color=discord.Color.blue()
+            )
+
+            view = AllianceSelectView(alliances_with_counts, self)
+
+            async def alliance_callback(select_interaction: discord.Interaction):
+                try:
+                    alliance_id = int(view.current_select.values[0])
+                    await self.show_member_list_nickname(select_interaction, alliance_id)
+                except Exception as e:
+                    print(f"Error in alliance selection: {e}")
+                    if not select_interaction.response.is_done():
+                        await select_interaction.response.send_message(
+                            "❌ An error occurred while processing your selection.",
+                            ephemeral=True
+                        )
+                    else:
+                        await select_interaction.followup.send(
+                            "❌ An error occurred while processing your selection.",
+                            ephemeral=True
+                        )
+
+            view.callback = alliance_callback
+
+            await interaction.response.send_message(
+                embed=select_embed,
+                view=view,
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"/track command error: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while processing your request.",
+                ephemeral=True
+            )
+
 class HistoryView(discord.ui.View):
     def __init__(self, cog):
         super().__init__()
