@@ -102,6 +102,17 @@ class GiftOperations(commands.Cog):
         """)
         self.conn.commit()
 
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS claim_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fid INTEGER,
+                giftcode TEXT,
+                claim_time TEXT,
+                FOREIGN KEY (giftcode) REFERENCES gift_codes (giftcode)
+            )
+        """)
+        self.conn.commit()
+
         # Add validation_status column to gift_codes table if it doesn't exist
         try:
             self.cursor.execute("ALTER TABLE gift_codes ADD COLUMN validation_status TEXT DEFAULT 'pending'")
@@ -862,6 +873,16 @@ class GiftOperations(commands.Cog):
 
                 except Exception as save_err:
                     self.logger.exception(f"GiftOps: Error saving captcha image ({filename_base}): {save_err}")
+
+        if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+            try:
+                self.cursor.execute(
+                    "INSERT INTO claim_logs (fid, giftcode, claim_time) VALUES (?, ?, ?)",
+                    (player_id, giftcode, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+                self.conn.commit()
+            except Exception as log_err:
+                self.logger.exception(f"GiftOps: Failed to log claim: {log_err}")
 
         self.logger.info(f"GiftOps: Final status for FID {player_id} / Code '{giftcode}': {status}")
         return status
@@ -1732,6 +1753,40 @@ class GiftOperations(commands.Cog):
             )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    async def claim_report(self, interaction: discord.Interaction):
+        self.cursor.execute(
+            "SELECT fid, COUNT(*) FROM claim_logs GROUP BY fid ORDER BY COUNT(*) DESC"
+        )
+        rows = self.cursor.fetchall()
+
+        if not rows:
+            await interaction.response.send_message(
+                "No claim data available.",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title="📈 Gift Claim Report",
+            color=discord.Color.blue()
+        )
+
+        for fid, count in rows:
+            embed.add_field(
+                name=f"FID {fid}",
+                value=f"Claimed {count} times",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.app_commands.command(
+        name="claimreport",
+        description="Show gift claim counts per user."
+    )
+    async def claimreport_command(self, interaction: discord.Interaction):
+        await self.claim_report(interaction)
 
     async def delete_gift_code(self, interaction: discord.Interaction):
         try:
@@ -2973,6 +3028,16 @@ class GiftView(discord.ui.View):
                     "❌ An error occurred while deleting gift channel.",
                     ephemeral=True
                 )
+
+    @discord.ui.button(
+        label="Claim Report",
+        emoji="📈",
+        style=discord.ButtonStyle.secondary,
+        custom_id="claim_report",
+        row=2
+    )
+    async def claim_report_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.claim_report(interaction)
 
     @discord.ui.button(
         label="Use Gift Code for Alliance",
