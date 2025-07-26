@@ -3,11 +3,13 @@ import sys
 import os
 import importlib
 import importlib.util
+import threading
 
 VENV_CREATION_TIMEOUT = 300
 PIP_INSTALL_TIMEOUT = 1200
 DOWNLOAD_TIMEOUT = 300
 OCR_INSTALL_TIMEOUT = 600
+DASHBOARD_PORT = 5000
 
 def is_container() -> bool:
     return os.path.exists("/.dockerenv") or os.path.exists("/var/run/secrets/kubernetes.io")
@@ -895,10 +897,20 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error syncing commands: {e}")
 
-    async def main():
-        await load_cogs()
-        
-        await bot.start(bot_token)
+async def main():
+    await load_cogs()
 
-    if __name__ == "__main__":
-        asyncio.run(main())
+    if "--dashboard" in sys.argv:
+        from dashboard import create_app
+
+        def run_dashboard() -> None:
+            app = create_app()
+            app.run(host="0.0.0.0", port=DASHBOARD_PORT)
+
+        threading.Thread(target=run_dashboard, daemon=True).start()
+
+    await bot.start(bot_token)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
