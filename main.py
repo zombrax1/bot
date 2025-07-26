@@ -10,6 +10,7 @@ PIP_INSTALL_TIMEOUT = 1200
 DOWNLOAD_TIMEOUT = 300
 OCR_INSTALL_TIMEOUT = 600
 DASHBOARD_PORT = 5000
+DASHBOARD_DEPENDENCIES = ["flask"]
 
 def is_container() -> bool:
     return os.path.exists("/.dockerenv") or os.path.exists("/var/run/secrets/kubernetes.io")
@@ -333,6 +334,33 @@ def check_ocr_dependencies():
             print("Please install latest 64-bit from: https://aka.ms/vs/17/release/vc_redist.x64.exe")
         return False
 
+def check_dashboard_dependencies() -> bool:
+    """Install Flask if the dashboard flag is used and it's missing."""
+    if "--dashboard" not in sys.argv:
+        return True
+
+    missing = []
+    for package in DASHBOARD_DEPENDENCIES:
+        if importlib.util.find_spec(package) is None:
+            print(f"✗ {package} - MISSING")
+            missing.append(package)
+
+    if missing:
+        print(f"Installing {len(missing)} dashboard packages...")
+        for package in missing:
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", package, "--no-cache-dir"],
+                    timeout=PIP_INSTALL_TIMEOUT,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print(f"✓ {package} installed successfully")
+            except Exception as e:
+                print(f"✗ Failed to install {package}: {e}")
+                return False
+    return True
+
 def setup_dependencies():
     """Main function to set up all dependencies."""
     print("Starting dependency check...")
@@ -351,7 +379,10 @@ def setup_dependencies():
     ocr_success = check_ocr_dependencies()
     if not ocr_success:
         print("OCR setup failed, but continuing with basic functionality")
-    
+
+    if not check_dashboard_dependencies():
+        return False
+
     print("Dependency check completed...")
     return True
 
