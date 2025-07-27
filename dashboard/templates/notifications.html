@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Notification Schedule</h2>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      {% for col in columns %}
+      <th>{{ col }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      {% for col in columns %}
+      <td>{{ row[col] }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if not rows %}
+<p>No notifications scheduled.</p>
+{% endif %}
+{% endblock %}

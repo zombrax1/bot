@@ -1,5 +1,6 @@
+import os
 import sqlite3
-from flask import Flask, jsonify
+from flask import Flask, render_template
 
 HOME_ROUTES = ["/alliances", "/giftcodes/stats", "/notifications"]
 
@@ -15,18 +16,21 @@ def _get_connection(path: str) -> sqlite3.Connection:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    template_dir = os.path.join(os.path.dirname(__file__), "templates")
+    app = Flask(__name__, template_folder=template_dir)
 
     @app.route("/")
     def index():
-        """Simple JSON message listing available routes."""
-        return jsonify({"message": "Dashboard is running", "routes": HOME_ROUTES})
+        return render_template("index.html", title="Dashboard")
 
     @app.route("/alliances")
     def list_alliances():
         with _get_connection(ALLIANCE_DB_PATH) as conn:
             rows = conn.execute("SELECT * FROM alliance_list").fetchall()
-            return jsonify([dict(row) for row in rows])
+            data = [dict(row) for row in rows]
+        return render_template(
+            "table.html", title="Alliances", rows=data, columns=data[0].keys() if data else []
+        )
 
     @app.route("/giftcodes/stats")
     def giftcode_stats():
@@ -34,11 +38,12 @@ def create_app() -> Flask:
             total_codes = conn.execute("SELECT COUNT(*) FROM gift_codes").fetchone()[0]
             total_claims = conn.execute("SELECT COUNT(*) FROM user_giftcodes").fetchone()[0]
             unique_users = conn.execute("SELECT COUNT(DISTINCT fid) FROM user_giftcodes").fetchone()[0]
-        return jsonify({
+        stats = {
             "total_codes": total_codes,
             "total_claims": total_claims,
             "unique_users": unique_users,
-        })
+        }
+        return render_template("giftcodes.html", title="Gift Code Stats", stats=stats)
 
     @app.route("/notifications")
     def notifications():
@@ -46,6 +51,12 @@ def create_app() -> Flask:
             rows = conn.execute(
                 "SELECT id, guild_id, channel_id, hour, minute, timezone, description, next_notification FROM bear_notifications"
             ).fetchall()
-            return jsonify([dict(row) for row in rows])
+            data = [dict(row) for row in rows]
+        return render_template(
+            "notifications.html",
+            title="Notifications",
+            rows=data,
+            columns=data[0].keys() if data else [],
+        )
 
     return app
