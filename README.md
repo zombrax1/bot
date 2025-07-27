@@ -151,7 +151,7 @@ See [Patch Notes](#-patch-notes) for complete details.
 - Old notifications (Embed or Message) remain fully editable.
 - Added **“Repeat on specific days”** for recurring event scheduling.
 - 🎟️ Added claim tracking database and `/claimreport` for summarizing gift code redemptions.
-- Gift claim reports now include weekly and monthly summaries via buttons.
+
 - Replaced the crusty old `wosland.com` PHP API with a modern, self-hosted Python version. (it's almost the same, but it smells new)
 - Gift codes now **auto-sync across all bot instances** again. Enjoy the easy and efficient shared redeeming!
 - Includes solid validation logic to block broken or invalid codes before they break the system.

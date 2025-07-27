@@ -1755,44 +1755,33 @@ class GiftOperations(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def claim_report(self, interaction: discord.Interaction):
-        view = ClaimReportView(self)
-        embed = discord.Embed(
-            title="📈 Gift Claim Reports",
-            description="Select a time period",
-            color=discord.Color.blue()
+
+        self.cursor.execute(
+            "SELECT fid, COUNT(*) FROM claim_logs GROUP BY fid ORDER BY COUNT(*) DESC"
         )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    def build_claim_report_embed(self, timeframe: str) -> discord.Embed:
-        base_query = "SELECT fid, COUNT(*) FROM claim_logs"
-        title_suffix = "All Time"
-        if timeframe == "monthly":
-            base_query += " WHERE strftime('%Y-%m', claim_time) = strftime('%Y-%m', 'now')"
-            title_suffix = datetime.now().strftime("%B")
-        elif timeframe == "weekly":
-            base_query += " WHERE strftime('%Y-%W', claim_time) = strftime('%Y-%W', 'now')"
-            title_suffix = "This Week"
-
-        base_query += " GROUP BY fid ORDER BY COUNT(*) DESC"
-        self.cursor.execute(base_query)
         rows = self.cursor.fetchall()
 
-        embed = discord.Embed(
-            title=f"📈 Gift Claim Report - {title_suffix}",
-            color=discord.Color.blue(),
-        )
-
         if not rows:
-            embed.description = "No claim data available."
-            return embed
+            await interaction.response.send_message(
+                "No claim data available.",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title="📈 Gift Claim Report",
+            color=discord.Color.blue()
+        )
 
         for fid, count in rows:
             embed.add_field(
                 name=f"FID {fid}",
-                value=f"Claimed {count} codes",
-                inline=False,
+                value=f"Claimed {count} times",
+                inline=False
             )
-        return embed
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
     @discord.app_commands.command(
         name="claimreport",
