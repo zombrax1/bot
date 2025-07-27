@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from flask import Flask, render_template, request, jsonify
 
 if __name__ == "__main__" or __package__ is None:
@@ -175,14 +176,28 @@ def create_app() -> Flask:
         users_conn = db.get_connection(USERS_DB)
         gift_conn = db.get_connection(GIFTCODE_DB)
         bear_conn = db.get_connection(BEARTIME_DB)
-        alliances = alliances_conn.execute("SELECT COUNT(*) FROM alliance_list").fetchone()[0]
-        members = users_conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        total_codes = gift_conn.execute("SELECT COUNT(*) FROM user_giftcodes").fetchone()[0]
-        success_codes = gift_conn.execute("SELECT COUNT(*) FROM user_giftcodes WHERE status='success'").fetchone()[0]
+        try:
+            alliances = alliances_conn.execute("SELECT COUNT(*) FROM alliance_list").fetchone()[0]
+        except sqlite3.Error:
+            alliances = 0
+        try:
+            members = users_conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        except sqlite3.Error:
+            members = 0
+        try:
+            total_codes = gift_conn.execute("SELECT COUNT(*) FROM user_giftcodes").fetchone()[0]
+            success_codes = gift_conn.execute(
+                "SELECT COUNT(*) FROM user_giftcodes WHERE status='success'"
+            ).fetchone()[0]
+        except sqlite3.Error:
+            total_codes = success_codes = 0
         success_pct = round((success_codes / total_codes * 100) if total_codes else 0, 2)
-        next_run = bear_conn.execute(
-            "SELECT MIN(next_notification) FROM bear_notifications WHERE is_enabled=1"
-        ).fetchone()[0]
+        try:
+            next_run = bear_conn.execute(
+                "SELECT MIN(next_notification) FROM bear_notifications WHERE is_enabled=1"
+            ).fetchone()[0]
+        except sqlite3.Error:
+            next_run = None
         chart = db.redemptions_last_7_days(GIFTCODE_DB)
         kpis = {
             "alliances": alliances,

@@ -1,8 +1,7 @@
 import os
 import sqlite3
-from functools import lru_cache
 from datetime import datetime, timedelta
-from typing import List, Tuple, Dict
+from typing import Dict, List, Tuple
 
 # Environment variable names
 ALLIANCE_DB_ENV = "ALLIANCE_DB"
@@ -30,8 +29,17 @@ _connections: Dict[str, sqlite3.Connection] = {}
 
 
 def get_connection(path: str) -> sqlite3.Connection:
-    """Return a cached sqlite3 connection for the given path."""
+    """Return a cached sqlite3 connection for the given path.
+
+    Missing parent directories are created automatically so connecting to a path
+    that does not yet exist will create an empty database instead of raising an
+    error.
+    """
+
     if path not in _connections:
+        dir_path = os.path.dirname(path)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
         conn = sqlite3.connect(path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         _connections[path] = conn
@@ -69,14 +77,17 @@ def fetch_paginated(
         cond = " OR ".join([f"{c} LIKE ?" for c in search_cols])
         where_clause = f"WHERE {cond}"
         params.extend([like] * len(search_cols))
-    total_query = f"SELECT COUNT(*) FROM {table} {where_clause}"
-    total = conn.execute(total_query, params).fetchone()[0]
-    query = (
-        f"SELECT {', '.join(columns)} FROM {table} {where_clause} "
-        f"ORDER BY {order_col} {order_dir} LIMIT ? OFFSET ?"
-    )
-    params_with_paging = params + [size, (page - 1) * size]
-    rows = [dict(row) for row in conn.execute(query, params_with_paging).fetchall()]
+    try:
+        total_query = f"SELECT COUNT(*) FROM {table} {where_clause}"
+        total = conn.execute(total_query, params).fetchone()[0]
+        query = (
+            f"SELECT {', '.join(columns)} FROM {table} {where_clause} "
+            f"ORDER BY {order_col} {order_dir} LIMIT ? OFFSET ?"
+        )
+        params_with_paging = params + [size, (page - 1) * size]
+        rows = [dict(row) for row in conn.execute(query, params_with_paging).fetchall()]
+    except sqlite3.Error:
+        rows, total = [], 0
     return rows, total
 
 
@@ -92,7 +103,7 @@ def redemptions_last_7_days(db_path: str) -> Dict[str, List]:
         if not rows:
             raise ValueError("no data")
         data = list(reversed([(row["day"], row["cnt"]) for row in rows]))
-    except Exception:
+    except sqlite3.Error:
         today = datetime.utcnow().date()
         data = [
             ((today - timedelta(days=i)).isoformat(), 0) for i in reversed(range(7))
@@ -113,14 +124,18 @@ def derive_notifications_rows(rows: List[Dict], conn: sqlite3.Connection) -> Lis
         hour = int(row.pop("hour", 0))
         minute = int(row.pop("minute", 0))
         row["time"] = f"{hour:02d}:{minute:02d}"
-        embed_count = conn.execute(
-            "SELECT COUNT(*) FROM bear_notification_embeds WHERE notification_id=?",
-            (row["id"],),
-        ).fetchone()[0]
+        try:
+            embed_count = conn.execute(
+                "SELECT COUNT(*) FROM bear_notification_embeds WHERE notification_id=?",
+                (row["id"],),
+            ).fetchone()[0]
+            days = conn.execute(
+                "SELECT GROUP_CONCAT(weekday, ',') FROM notification_days WHERE notification_id=?",
+                (row["id"],),
+            ).fetchone()[0]
+        except sqlite3.Error:
+            embed_count = 0
+            days = ""
         row["embed_count"] = embed_count
-        days = conn.execute(
-            "SELECT GROUP_CONCAT(weekday, ',') FROM notification_days WHERE notification_id=?",
-            (row["id"],),
-        ).fetchone()[0]
         row["days"] = days or ""
     return rows
