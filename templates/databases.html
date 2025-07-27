@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Databases</h1>
+{% if databases %}
+<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
+  {% for db in databases %}
+  <div class="col">
+    <a href="{{ url_for('download_db', name=db) }}" class="btn btn-primary w-100">{{ db }}</a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p>No database files found.</p>
+{% endif %}
+{% endblock %}
+

@@ -14,7 +14,7 @@
     className: { table: 'table table-hover align-middle' },
     server: {
       url: "{{ data_url }}",
-      then: data => data.items.map(r => [r.id, r.name, r.guild_id, r.members_count, r.created_at]),
+      then: data => data.items.map(row => [row.id, row.name, row.guild, row.members, row.created]),
       total: data => data.total
     }
   }).render(document.getElementById('grid'));

@@ -6,12 +6,10 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css" rel="stylesheet">
-    <title>{{ title or 'Dashboard' }}</title>
+    <title>{{ title or "Dashboard" }}</title>
     <style>
       body { padding-top: 56px; }
       .sidebar { min-width: 200px; }
-      .sidebar .list-group { position: sticky; top: 56px; }
-      .card { border-radius: 14px; }
       @media (min-width: 992px) {
         .offcanvas-lg { position: static; transform: none; visibility: visible !important; }
       }
@@ -38,8 +36,13 @@
       </div>
       <div class="offcanvas-body p-0">
         <div class="list-group list-group-flush">
-          <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action {% if active == 'overview' %}active{% endif %}">Overview</a>
-          <a href="{{ url_for('alliances') }}" class="list-group-item list-group-item-action {% if active == 'alliances' %}active{% endif %}">Alliances</a>
+          <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action {% if request.path == '/' %}active{% endif %}">Overview</a>
+          <a href="{{ url_for('alliances') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/alliances') %}active{% endif %}">Alliances</a>
+          <a href="{{ url_for('giftcodes') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/giftcodes') %}active{% endif %}">Gift Codes</a>
+          <a href="{{ url_for('notifications') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/notifications') %}active{% endif %}">Notifications</a>
+          <a href="{{ url_for('usernames') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/usernames') %}active{% endif %}">Name Changes</a>
+          <a href="{{ url_for('fc_tracking') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/fc-tracking') %}active{% endif %}">FC Tracking</a>
+          <a href="{{ url_for('databases') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/databases') %}active{% endif %}">Databases</a>
         </div>
       </div>
     </div>
@@ -47,9 +50,14 @@
     <div class="container-fluid">
       <div class="row">
         <nav class="col-lg-2 d-none d-lg-block bg-body-secondary sidebar">
-          <div class="list-group list-group-flush pt-2">
-            <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action {% if active == 'overview' %}active{% endif %}">Overview</a>
-            <a href="{{ url_for('alliances') }}" class="list-group-item list-group-item-action {% if active == 'alliances' %}active{% endif %}">Alliances</a>
+          <div class="list-group list-group-flush sticky-top pt-2">
+            <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action {% if request.path == '/' %}active{% endif %}">Overview</a>
+            <a href="{{ url_for('alliances') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/alliances') %}active{% endif %}">Alliances</a>
+            <a href="{{ url_for('giftcodes') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/giftcodes') %}active{% endif %}">Gift Codes</a>
+            <a href="{{ url_for('notifications') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/notifications') %}active{% endif %}">Notifications</a>
+            <a href="{{ url_for('usernames') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/usernames') %}active{% endif %}">Name Changes</a>
+            <a href="{{ url_for('fc_tracking') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/fc-tracking') %}active{% endif %}">FC Tracking</a>
+            <a href="{{ url_for('databases') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/databases') %}active{% endif %}">Databases</a>
           </div>
         </nav>
         <main class="col-lg-10 ms-sm-auto px-md-4 pt-4">

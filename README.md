@@ -124,6 +124,25 @@ Use these logs to troubleshoot issues or confirm successful redemptions.
 
 If you encounter issues with this patch, reach out to the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
 
+### Dashboard
+
+The bot ships with a web dashboard that displays alliance data, gift code stats,
+notification schedules, user name changes and FC tracking in professional tables.
+It also includes a **Databases** page that lists every `.db` file in the `db`
+folder, allowing you to download them directly from the browser.
+Launch it with:
+
+```
+python app.py
+```
+
+Then open [http://localhost:5000](http://localhost:5000) in your browser. On
+Windows PowerShell you can also run it via Flask:
+
+```powershell
+$env:FLASK_APP="app.py"; $env:FLASK_ENV="development"; flask run --port 5000
+```
+
 ---
 
 ## Features
