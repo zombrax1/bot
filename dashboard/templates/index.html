@@ -11,5 +11,17 @@
   <div class="col-md-4 mb-3">
     <a href="{{ url_for('notifications') }}" class="btn btn-info btn-lg w-100">Notification Schedule</a>
   </div>
+  <div class="col-md-4 mb-3">
+    <a href="{{ url_for('users') }}" class="btn btn-secondary btn-lg w-100">Users</a>
+  </div>
+  <div class="col-md-4 mb-3">
+    <a href="{{ url_for('list_changes', change_type='furnace') }}" class="btn btn-warning btn-lg w-100">Furnace Changes</a>
+  </div>
+  <div class="col-md-4 mb-3">
+    <a href="{{ url_for('list_changes', change_type='nickname') }}" class="btn btn-danger btn-lg w-100">Nickname Changes</a>
+  </div>
+  <div class="col-md-4 mb-3">
+    <a href="{{ url_for('id_channels') }}" class="btn btn-dark btn-lg w-100">ID Channels</a>
+  </div>
 </div>
 {% endblock %}

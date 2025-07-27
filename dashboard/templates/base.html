@@ -18,6 +18,17 @@
             <li class="nav-item"><a class="nav-link" href="{{ url_for('list_alliances') }}">Alliances</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('giftcode_stats') }}">Gift Codes</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('notifications') }}">Notifications</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('users') }}">Users</a></li>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" id="changesDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Changes
+              </a>
+              <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="changesDropdown">
+                <li><a class="dropdown-item" href="{{ url_for('list_changes', change_type='furnace') }}">Furnace</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('list_changes', change_type='nickname') }}">Nickname</a></li>
+              </ul>
+            </li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('id_channels') }}">ID Channels</a></li>
           </ul>
         </div>
       </div>
