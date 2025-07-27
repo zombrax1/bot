@@ -1,4 +1,12 @@
-from flask import Flask, jsonify, render_template, url_for
+from pathlib import Path
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    render_template,
+    send_from_directory,
+    url_for,
+)
 
 STATS = {
     "alliances": 12,
@@ -57,6 +65,9 @@ SAMPLE_FC_TRACK = [
     {"id": 4, "user": "Tank#4567", "fc": "mnop-3456", "last_seen": "2025-07-16", "alliance": "Delta"},
     {"id": 5, "user": "Healer#5678", "fc": "qrst-7890", "last_seen": "2025-07-17", "alliance": "Echo"},
 ]
+
+# Directory holding SQLite databases
+DB_FOLDER = Path("db")
 
 
 def create_app() -> Flask:
@@ -130,6 +141,22 @@ def create_app() -> Flask:
     @app.route("/api/fc-tracking")
     def fc_tracking_data() -> dict:
         return jsonify({"items": SAMPLE_FC_TRACK, "total": len(SAMPLE_FC_TRACK)})
+
+    @app.route("/databases")
+    def databases() -> str:
+        db_files = [f.name for f in DB_FOLDER.glob("*.db")] if DB_FOLDER.is_dir() else []
+        return render_template(
+            "databases.html",
+            title="Databases",
+            databases=db_files,
+        )
+
+    @app.route("/db/<path:name>")
+    def download_db(name: str):
+        allowed = {f.name for f in DB_FOLDER.glob("*.db")}
+        if name not in allowed:
+            abort(404)
+        return send_from_directory(DB_FOLDER, name, as_attachment=True)
 
     return app
 

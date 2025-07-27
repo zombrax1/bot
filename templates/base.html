@@ -42,6 +42,7 @@
           <a href="{{ url_for('notifications') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/notifications') %}active{% endif %}">Notifications</a>
           <a href="{{ url_for('usernames') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/usernames') %}active{% endif %}">Name Changes</a>
           <a href="{{ url_for('fc_tracking') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/fc-tracking') %}active{% endif %}">FC Tracking</a>
+          <a href="{{ url_for('databases') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/databases') %}active{% endif %}">Databases</a>
         </div>
       </div>
     </div>
@@ -56,6 +57,7 @@
             <a href="{{ url_for('notifications') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/notifications') %}active{% endif %}">Notifications</a>
             <a href="{{ url_for('usernames') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/usernames') %}active{% endif %}">Name Changes</a>
             <a href="{{ url_for('fc_tracking') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/fc-tracking') %}active{% endif %}">FC Tracking</a>
+            <a href="{{ url_for('databases') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/databases') %}active{% endif %}">Databases</a>
           </div>
         </nav>
         <main class="col-lg-10 ms-sm-auto px-md-4 pt-4">
