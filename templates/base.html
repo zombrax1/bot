@@ -38,6 +38,10 @@
         <div class="list-group list-group-flush">
           <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action {% if request.path == '/' %}active{% endif %}">Overview</a>
           <a href="{{ url_for('alliances') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/alliances') %}active{% endif %}">Alliances</a>
+          <a href="{{ url_for('giftcodes') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/giftcodes') %}active{% endif %}">Gift Codes</a>
+          <a href="{{ url_for('notifications') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/notifications') %}active{% endif %}">Notifications</a>
+          <a href="{{ url_for('usernames') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/usernames') %}active{% endif %}">Name Changes</a>
+          <a href="{{ url_for('fc_tracking') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/fc-tracking') %}active{% endif %}">FC Tracking</a>
         </div>
       </div>
     </div>
@@ -48,6 +52,10 @@
           <div class="list-group list-group-flush sticky-top pt-2">
             <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action {% if request.path == '/' %}active{% endif %}">Overview</a>
             <a href="{{ url_for('alliances') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/alliances') %}active{% endif %}">Alliances</a>
+            <a href="{{ url_for('giftcodes') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/giftcodes') %}active{% endif %}">Gift Codes</a>
+            <a href="{{ url_for('notifications') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/notifications') %}active{% endif %}">Notifications</a>
+            <a href="{{ url_for('usernames') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/usernames') %}active{% endif %}">Name Changes</a>
+            <a href="{{ url_for('fc_tracking') }}" class="list-group-item list-group-item-action {% if request.path.startswith('/fc-tracking') %}active{% endif %}">FC Tracking</a>
           </div>
         </nav>
         <main class="col-lg-10 ms-sm-auto px-md-4 pt-4">
