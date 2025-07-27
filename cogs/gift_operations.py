@@ -1755,6 +1755,7 @@ class GiftOperations(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def claim_report(self, interaction: discord.Interaction):
+
         self.cursor.execute(
             "SELECT fid, COUNT(*) FROM claim_logs GROUP BY fid ORDER BY COUNT(*) DESC"
         )
@@ -1780,6 +1781,7 @@ class GiftOperations(commands.Cog):
             )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
     @discord.app_commands.command(
         name="claimreport",
@@ -3343,6 +3345,28 @@ class GiftView(discord.ui.View):
                 await alliance_cog.show_main_menu(interaction)
         except:
             pass
+
+
+class ClaimReportView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+
+    async def _show_results(self, interaction: discord.Interaction, timeframe: str):
+        embed = self.cog.build_claim_report_embed(timeframe)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="All Time", style=discord.ButtonStyle.secondary, custom_id="claim_all")
+    async def report_all_time(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_results(interaction, "all")
+
+    @discord.ui.button(label="Monthly", style=discord.ButtonStyle.secondary, custom_id="claim_month")
+    async def report_month(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_results(interaction, "monthly")
+
+    @discord.ui.button(label="Weekly", style=discord.ButtonStyle.secondary, custom_id="claim_week")
+    async def report_week(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_results(interaction, "weekly")
 
 class OCRSettingsView(discord.ui.View):
     def __init__(self, cog, ocr_settings, ddddocr_available):

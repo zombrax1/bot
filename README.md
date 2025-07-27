@@ -40,7 +40,7 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
  - **Are you installing for the first time?** Follow the instructions [for New Installations](https://github.com/whiteout-project/bot?tab=readme-ov-file#for-new-installations) instead.
  - If you run your bot on Windows, there is a known issue with onnxruntime + an outdated Visual C++ library. To overcome this, install [the latest version of Visual C++](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) and then run `main.py` again.
 - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
-- To view alliance data, gift code stats, and notification schedules in a browser, start the bot with `main.py --dashboard` and open `http://localhost:5000`.
+
 - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
 
 ### ⚠️ Python 3.13 Users: Read This or Else!
@@ -152,6 +152,7 @@ See [Patch Notes](#-patch-notes) for complete details.
 - Old notifications (Embed or Message) remain fully editable.
 - Added **“Repeat on specific days”** for recurring event scheduling.
 - 🎟️ Added claim tracking database and `/claimreport` for summarizing gift code redemptions.
+
 - Replaced the crusty old `wosland.com` PHP API with a modern, self-hosted Python version. (it's almost the same, but it smells new)
 - Gift codes now **auto-sync across all bot instances** again. Enjoy the easy and efficient shared redeeming!
 - Includes solid validation logic to block broken or invalid codes before they break the system.
