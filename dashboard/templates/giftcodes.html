@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Gift Code Statistics</h2>
+<ul class="list-group">
+  <li class="list-group-item d-flex justify-content-between"><span>Total Codes</span><span>{{ stats.total_codes }}</span></li>
+  <li class="list-group-item d-flex justify-content-between"><span>Total Claims</span><span>{{ stats.total_claims }}</span></li>
+  <li class="list-group-item d-flex justify-content-between"><span>Unique Users</span><span>{{ stats.unique_users }}</span></li>
+</ul>
+{% endblock %}

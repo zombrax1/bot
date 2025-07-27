@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Dashboard</h1>
+<ul class="list-group">
+  <li class="list-group-item"><a href="{{ url_for('list_alliances') }}">Alliance Data</a></li>
+  <li class="list-group-item"><a href="{{ url_for('giftcode_stats') }}">Gift Code Stats</a></li>
+  <li class="list-group-item"><a href="{{ url_for('notifications') }}">Notification Schedule</a></li>
+</ul>
+{% endblock %}

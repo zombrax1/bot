@@ -39,8 +39,9 @@ After switching to ONNX based [ddddocr](https://github.com/sml2h3/ddddocr), syst
 ### ⚠️ **IMPORTANT ⚠️**
  - **Are you installing for the first time?** Follow the instructions [for New Installations](https://github.com/whiteout-project/bot?tab=readme-ov-file#for-new-installations) instead.
  - If you run your bot on Windows, there is a known issue with onnxruntime + an outdated Visual C++ library. To overcome this, install [the latest version of Visual C++](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) and then run `main.py` again.
- - If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
- - The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
+- If you run your bot non-interactively, for example in a container or as a systemd service, you should run `main.py --autoupdate` to prevent the bot from using the interactive update prompt.
+- To view alliance data, gift code stats, and notification schedules in a browser, start the bot with `main.py --dashboard` and open `http://localhost:5000`.
+- The current version of the bot will create a backup of your database folder to `db.bak` automatically during updates, so you do not need to worry about it anymore.
 
 ### ⚠️ Python 3.13 Users: Read This or Else!
 - **`ddddocr` still doesn’t support Python 3.13+.**  
