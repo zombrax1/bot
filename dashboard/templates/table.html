@@ -1,26 +1,22 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 {% block content %}
-<div class="table-responsive">
-<table class="table table-striped">
-  <thead>
-    <tr>
-      {% for col in columns %}
-      <th>{{ col }}</th>
-      {% endfor %}
-    </tr>
-  </thead>
-  <tbody>
-    {% for row in rows %}
-    <tr>
-      {% for col in columns %}
-      <td>{{ row[col] }}</td>
-      {% endfor %}
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% if not rows %}
-<p>No data found.</p>
-{% endif %}
+<h1 class="mb-4">{{ title }}</h1>
+<div id="grid"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  new gridjs.Grid({
+    columns: {{ columns|tojson }},
+    search: true,
+    sort: true,
+    pagination: { limit: 10 },
+    className: { table: 'table table-hover align-middle' },
+    server: {
+      url: "{{ data_url }}",
+      then: data => data.items.map(r => [r.id, r.name, r.guild_id, r.members_count, r.created_at]),
+      total: data => data.total
+    }
+  }).render(document.getElementById('grid'));
+</script>
 {% endblock %}
