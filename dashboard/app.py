@@ -1,124 +1,243 @@
 import os
-import sqlite3
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify
 
-HOME_ROUTES = [
-    "/alliances",
-    "/giftcodes/stats",
-    "/notifications",
-    "/users",
-    "/changes/furnace",
-    "/changes/nickname",
-    "/id-channels",
-]
+if __name__ == "__main__" or __package__ is None:
+    import db
+else:
+    from . import db
 
-ALLIANCE_DB_PATH = "db/alliance.sqlite"
-GIFT_DB_PATH = "db/giftcode.sqlite"
-NOTIFICATION_DB_PATH = "db/beartime.sqlite"
-USERS_DB_PATH = "db/users.sqlite"
-CHANGES_DB_PATH = "db/changes.sqlite"
-ID_CHANNEL_DB_PATH = "db/id_channel.sqlite"
-CHANGE_TABLES = {
-    "furnace": "furnace_changes",
-    "nickname": "nickname_changes",
+
+def _db_path(env: str) -> str:
+    return os.getenv(env, db.DEFAULT_PATHS[env])
+
+
+ALLIANCE_DB = _db_path(db.ALLIANCE_DB_ENV)
+USERS_DB = _db_path(db.USERS_DB_ENV)
+GIFTCODE_DB = _db_path(db.GIFTCODE_DB_ENV)
+BEARTIME_DB = _db_path(db.BEARTIME_DB_ENV)
+SETTINGS_DB = _db_path(db.SETTINGS_DB_ENV)
+ID_CHANNEL_DB = _db_path(db.ID_CHANNEL_DB_ENV)
+BACKUP_DB = _db_path(db.BACKUP_DB_ENV)
+
+
+TABLE_CONFIGS = {
+    "alliances": {
+        "title": "Alliances",
+        "db": ALLIANCE_DB,
+        "table": "alliance_list",
+        "columns": ["alliance_id", "name", "discord_server_id"],
+        "search": ["name", "discord_server_id"],
+        "default_sort": "name ASC",
+        "api": "/api/alliances",
+    },
+    "users": {
+        "title": "Users",
+        "db": USERS_DB,
+        "table": "users",
+        "columns": [
+            "fid",
+            "nickname",
+            "furnace_lv",
+            "kid",
+            "stove_lv_content",
+            "alliance",
+        ],
+        "search": ["fid", "nickname", "alliance"],
+        "default_sort": "fid ASC",
+        "api": "/api/users",
+    },
+    "gift-codes": {
+        "title": "Gift Codes",
+        "db": GIFTCODE_DB,
+        "table": "gift_codes",
+        "columns": ["giftcode", "date", "validation_status"],
+        "search": ["giftcode", "validation_status"],
+        "default_sort": "date DESC",
+        "api": "/api/gift-codes",
+    },
+    "gift-claims": {
+        "title": "Gift Claim Logs",
+        "db": GIFTCODE_DB,
+        "table": "claim_logs",
+        "columns": ["id", "fid", "giftcode", "claim_time"],
+        "search": ["fid", "giftcode"],
+        "default_sort": "claim_time DESC",
+        "api": "/api/gift-claims",
+    },
+    "user-giftcodes": {
+        "title": "User Gift Codes",
+        "db": GIFTCODE_DB,
+        "table": "user_giftcodes",
+        "columns": ["fid", "giftcode", "status"],
+        "search": ["fid", "giftcode", "status"],
+        "default_sort": "fid ASC",
+        "api": "/api/user-giftcodes",
+    },
+    "notifications": {
+        "title": "Notification Schedules",
+        "db": BEARTIME_DB,
+        "table": "bear_notifications",
+        "columns": [
+            "id",
+            "guild_id",
+            "channel_id",
+            "hour",
+            "minute",
+            "timezone",
+            "description",
+            "notification_type",
+            "mention_type",
+            "repeat_enabled",
+            "repeat_minutes",
+            "is_enabled",
+            "next_notification",
+        ],
+        "search": ["guild_id", "channel_id", "description"],
+        "default_sort": "next_notification ASC",
+        "api": "/api/notifications",
+        "final_columns": [
+            "id",
+            "guild_id",
+            "channel_id",
+            "time",
+            "timezone",
+            "description",
+            "notification_type",
+            "mention_type",
+            "repeat_enabled",
+            "repeat_minutes",
+            "is_enabled",
+            "next_notification",
+            "embed_count",
+            "days",
+        ],
+    },
+    "notifications/history": {
+        "title": "Notification History",
+        "db": BEARTIME_DB,
+        "table": "notification_history",
+        "columns": ["id", "notification_id", "notification_time", "sent_at"],
+        "search": ["notification_id"],
+        "default_sort": "sent_at DESC",
+        "api": "/api/notifications/history",
+    },
+    "id-channels": {
+        "title": "ID Channels",
+        "db": ID_CHANNEL_DB,
+        "table": "id_channels",
+        "columns": [
+            "guild_id",
+            "alliance_id",
+            "channel_id",
+            "created_at",
+            "created_by",
+        ],
+        "search": ["guild_id", "alliance_id", "channel_id"],
+        "default_sort": "created_at DESC",
+        "api": "/api/id-channels",
+    },
+    "settings": {
+        "title": "Bot Settings",
+        "db": SETTINGS_DB,
+        "table": "botsettings",
+        "columns": ["id", "channelid", "giftcodestatus"],
+        "search": ["channelid", "giftcodestatus"],
+        "default_sort": "id ASC",
+        "api": "/api/settings/bot",
+    },
+    "settings-ocr": {
+        "title": "OCR Settings",
+        "db": SETTINGS_DB,
+        "table": "ocr_settings",
+        "columns": ["id", "enabled", "save_images"],
+        "search": ["enabled"],
+        "default_sort": "id ASC",
+        "api": "/api/settings/ocr",
+    },
+    "backups": {
+        "title": "Backup Passwords",
+        "db": BACKUP_DB,
+        "table": "backup_passwords",
+        "columns": ["discord_id", "backup_password", "created_at"],
+        "search": ["discord_id"],
+        "default_sort": "created_at DESC",
+        "api": "/api/backups",
+    },
 }
 
 
-def _fetch_rows(path: str, query: str) -> list[dict]:
-    """Return query results as a list of dictionaries."""
-    with _get_connection(path) as conn:
-        rows = conn.execute(query).fetchall()
-        return [dict(row) for row in rows]
-
-
-def _get_connection(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def create_app() -> Flask:
-    template_dir = os.path.join(os.path.dirname(__file__), "templates")
-    app = Flask(__name__, template_folder=template_dir)
+    app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), "templates"))
 
     @app.route("/")
-    def index():
-        return render_template("index.html", title="Dashboard")
-
-    @app.route("/alliances")
-    def list_alliances():
-        rows = _fetch_rows(ALLIANCE_DB_PATH, "SELECT * FROM alliance_list")
-        return render_template(
-            "alliances.html",
-            title="Alliances",
-            rows=rows,
-            columns=rows[0].keys() if rows else [],
-        )
-
-    @app.route("/giftcodes/stats")
-    def giftcode_stats():
-        with _get_connection(GIFT_DB_PATH) as conn:
-            total_codes = conn.execute("SELECT COUNT(*) FROM gift_codes").fetchone()[0]
-            total_claims = conn.execute("SELECT COUNT(*) FROM user_giftcodes").fetchone()[0]
-            unique_users = conn.execute("SELECT COUNT(DISTINCT fid) FROM user_giftcodes").fetchone()[0]
-        stats = {
-            "total_codes": total_codes,
-            "total_claims": total_claims,
-            "unique_users": unique_users,
+    def overview():
+        alliances_conn = db.get_connection(ALLIANCE_DB)
+        users_conn = db.get_connection(USERS_DB)
+        gift_conn = db.get_connection(GIFTCODE_DB)
+        bear_conn = db.get_connection(BEARTIME_DB)
+        alliances = alliances_conn.execute("SELECT COUNT(*) FROM alliance_list").fetchone()[0]
+        members = users_conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        total_codes = gift_conn.execute("SELECT COUNT(*) FROM user_giftcodes").fetchone()[0]
+        success_codes = gift_conn.execute("SELECT COUNT(*) FROM user_giftcodes WHERE status='success'").fetchone()[0]
+        success_pct = round((success_codes / total_codes * 100) if total_codes else 0, 2)
+        next_run = bear_conn.execute(
+            "SELECT MIN(next_notification) FROM bear_notifications WHERE is_enabled=1"
+        ).fetchone()[0]
+        chart = db.redemptions_last_7_days(GIFTCODE_DB)
+        kpis = {
+            "alliances": alliances,
+            "members": members,
+            "success_pct": success_pct,
+            "next_run": next_run or "N/A",
         }
-        return render_template("giftcodes.html", title="Gift Code Stats", stats=stats)
+        return render_template("index.html", title="Overview", kpis=kpis, chart=chart)
 
-    @app.route("/notifications")
-    def notifications():
-        query = (
-            "SELECT id, guild_id, channel_id, hour, minute, timezone, description, "
-            "next_notification FROM bear_notifications"
-        )
-        rows = _fetch_rows(NOTIFICATION_DB_PATH, query)
-        return render_template(
-            "notifications.html",
-            title="Notifications",
-            rows=rows,
-            columns=rows[0].keys() if rows else [],
-        )
+    def register_table_routes(name: str, cfg: dict) -> None:
+        route = f"/{name.replace('_', '-') if '_' in name else name}"
+        api_route = cfg["api"]
 
-    @app.route("/users")
-    def users():
-        rows = _fetch_rows(USERS_DB_PATH, "SELECT * FROM users")
-        return render_template(
-            "users.html",
-            title="Users",
-            rows=rows,
-            columns=rows[0].keys() if rows else [],
-        )
-
-    @app.route("/changes/<change_type>")
-    def list_changes(change_type: str):
-        table = CHANGE_TABLES.get(change_type)
-        if not table:
+        def table_page(cfg=cfg):
+            columns = cfg.get("final_columns", cfg["columns"])
             return render_template(
-                "table.html",
-                title="Unknown Change Type",
-                rows=[],
-                columns=[],
+                "table.html", title=cfg["title"], columns=columns, data_url=api_route
             )
-        rows = _fetch_rows(CHANGES_DB_PATH, f"SELECT * FROM {table}")
-        template = f"{change_type}_changes.html"
-        return render_template(
-            template,
-            title=f"{change_type.capitalize()} Changes",
-            rows=rows,
-            columns=rows[0].keys() if rows else [],
-        )
 
-    @app.route("/id-channels")
-    def id_channels():
-        rows = _fetch_rows(ID_CHANNEL_DB_PATH, "SELECT * FROM id_channels")
-        return render_template(
-            "id_channels.html",
-            title="ID Channels",
-            rows=rows,
-            columns=rows[0].keys() if rows else [],
-        )
+        def table_api(cfg=cfg):
+            page = int(request.args.get("page", 1))
+            size = int(request.args.get("size", 10))
+            sort = request.args.get("sort", "")
+            search = request.args.get("search", "")
+            rows, total = db.fetch_paginated(
+                cfg["db"],
+                cfg["table"],
+                cfg["columns"],
+                cfg["search"],
+                page,
+                size,
+                sort,
+                cfg["default_sort"],
+                search,
+            )
+            if name == "notifications":
+                conn = db.get_connection(cfg["db"])
+                rows = db.derive_notifications_rows(rows, conn)
+                final_cols = cfg["final_columns"]
+                rows = [{col: r.get(col) for col in final_cols} for r in rows]
+            if name == "backups":
+                for r in rows:
+                    r["backup_password"] = db.mask_password(r.get("backup_password", ""))
+            return jsonify({"items": rows, "total": total})
+
+        page_endpoint = name.replace("/", "_").replace("-", "_")
+        api_endpoint = f"api_{page_endpoint}"
+        app.add_url_rule(route, endpoint=page_endpoint, view_func=table_page)
+        app.add_url_rule(api_route, endpoint=api_endpoint, view_func=table_api)
+
+    for n, c in TABLE_CONFIGS.items():
+        register_table_routes(n, c)
 
     return app
+
+
+if __name__ == "__main__":
+    create_app().run(debug=True)
