@@ -10,10 +10,32 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <div class="container-fluid">
         <a class="navbar-brand" href="{{ url_for('index') }}">Bot Dashboard</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('list_alliances') }}">Alliances</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('giftcode_stats') }}">Gift Codes</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('notifications') }}">Notifications</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('users') }}">Users</a></li>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" id="changesDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Changes
+              </a>
+              <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="changesDropdown">
+                <li><a class="dropdown-item" href="{{ url_for('list_changes', change_type='furnace') }}">Furnace</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('list_changes', change_type='nickname') }}">Nickname</a></li>
+              </ul>
+            </li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('id_channels') }}">ID Channels</a></li>
+          </ul>
+        </div>
       </div>
     </nav>
     <main class="container py-4">
       {% block content %}{% endblock %}
     </main>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
   </body>
 </html>
