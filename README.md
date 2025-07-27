@@ -124,6 +124,17 @@ Use these logs to troubleshoot issues or confirm successful redemptions.
 
 If you encounter issues with this patch, reach out to the [project admins](https://github.com/orgs/whiteout-project/people) or open an issue on Github.
 
+### Dashboard
+
+The bot ships with a simple web dashboard for viewing alliance data, gift code statistics and notification schedules.
+Launch it with:
+
+```
+python app.py
+```
+
+Then open [http://localhost:5000](http://localhost:5000) in your browser.
+
 ---
 
 ## Features
