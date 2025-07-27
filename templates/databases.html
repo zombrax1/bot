@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Databases</h1>
+{% if databases %}
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Size (KB)</th>
+        <th>Modified</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for db in databases %}
+      <tr>
+        <td>{{ db.name }}</td>
+        <td>{{ db.size }}</td>
+        <td>{{ db.modified }}</td>
+        <td>
+          <a href="{{ url_for('download_db', name=db.name) }}" class="btn btn-sm btn-primary">Download</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>No database files found.</p>
+{% endif %}
+{% endblock %}
+

@@ -6,15 +6,17 @@
 
 {% block scripts %}
 <script>
+  const columns = {{ columns|tojson }};
+  const fields = {{ fields|tojson }};
   new gridjs.Grid({
-    columns: {{ columns|tojson }},
+    columns: columns,
     search: true,
     sort: true,
     pagination: { limit: 10 },
     className: { table: 'table table-hover align-middle' },
     server: {
       url: "{{ data_url }}",
-      then: data => data.items.map(r => [r.id, r.name, r.guild_id, r.members_count, r.created_at]),
+      then: data => data.items.map(row => fields.map(f => row[f])),
       total: data => data.total
     }
   }).render(document.getElementById('grid'));
