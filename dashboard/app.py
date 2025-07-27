@@ -18,6 +18,17 @@ NOTIFICATION_DB_PATH = "db/beartime.sqlite"
 USERS_DB_PATH = "db/users.sqlite"
 CHANGES_DB_PATH = "db/changes.sqlite"
 ID_CHANNEL_DB_PATH = "db/id_channel.sqlite"
+CHANGE_TABLES = {
+    "furnace": "furnace_changes",
+    "nickname": "nickname_changes",
+}
+
+
+def _fetch_rows(path: str, query: str) -> list[dict]:
+    """Return query results as a list of dictionaries."""
+    with _get_connection(path) as conn:
+        rows = conn.execute(query).fetchall()
+        return [dict(row) for row in rows]
 
 
 def _get_connection(path: str) -> sqlite3.Connection:
@@ -36,11 +47,12 @@ def create_app() -> Flask:
 
     @app.route("/alliances")
     def list_alliances():
-        with _get_connection(ALLIANCE_DB_PATH) as conn:
-            rows = conn.execute("SELECT * FROM alliance_list").fetchall()
-            data = [dict(row) for row in rows]
+        rows = _fetch_rows(ALLIANCE_DB_PATH, "SELECT * FROM alliance_list")
         return render_template(
-            "table.html", title="Alliances", rows=data, columns=data[0].keys() if data else []
+            "alliances.html",
+            title="Alliances",
+            rows=rows,
+            columns=rows[0].keys() if rows else [],
         )
 
     @app.route("/giftcodes/stats")
@@ -58,37 +70,31 @@ def create_app() -> Flask:
 
     @app.route("/notifications")
     def notifications():
-        with _get_connection(NOTIFICATION_DB_PATH) as conn:
-            rows = conn.execute(
-                "SELECT id, guild_id, channel_id, hour, minute, timezone, description, next_notification FROM bear_notifications"
-            ).fetchall()
-            data = [dict(row) for row in rows]
+        query = (
+            "SELECT id, guild_id, channel_id, hour, minute, timezone, description, "
+            "next_notification FROM bear_notifications"
+        )
+        rows = _fetch_rows(NOTIFICATION_DB_PATH, query)
         return render_template(
             "notifications.html",
             title="Notifications",
-            rows=data,
-            columns=data[0].keys() if data else [],
+            rows=rows,
+            columns=rows[0].keys() if rows else [],
         )
 
     @app.route("/users")
     def users():
-        with _get_connection(USERS_DB_PATH) as conn:
-            rows = conn.execute("SELECT * FROM users").fetchall()
-            data = [dict(row) for row in rows]
+        rows = _fetch_rows(USERS_DB_PATH, "SELECT * FROM users")
         return render_template(
-            "table.html",
+            "users.html",
             title="Users",
-            rows=data,
-            columns=data[0].keys() if data else [],
+            rows=rows,
+            columns=rows[0].keys() if rows else [],
         )
 
     @app.route("/changes/<change_type>")
     def list_changes(change_type: str):
-        table_map = {
-            "furnace": "furnace_changes",
-            "nickname": "nickname_changes",
-        }
-        table = table_map.get(change_type)
+        table = CHANGE_TABLES.get(change_type)
         if not table:
             return render_template(
                 "table.html",
@@ -96,26 +102,23 @@ def create_app() -> Flask:
                 rows=[],
                 columns=[],
             )
-        with _get_connection(CHANGES_DB_PATH) as conn:
-            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
-            data = [dict(row) for row in rows]
+        rows = _fetch_rows(CHANGES_DB_PATH, f"SELECT * FROM {table}")
+        template = f"{change_type}_changes.html"
         return render_template(
-            "table.html",
+            template,
             title=f"{change_type.capitalize()} Changes",
-            rows=data,
-            columns=data[0].keys() if data else [],
+            rows=rows,
+            columns=rows[0].keys() if rows else [],
         )
 
     @app.route("/id-channels")
     def id_channels():
-        with _get_connection(ID_CHANNEL_DB_PATH) as conn:
-            rows = conn.execute("SELECT * FROM id_channels").fetchall()
-            data = [dict(row) for row in rows]
+        rows = _fetch_rows(ID_CHANNEL_DB_PATH, "SELECT * FROM id_channels")
         return render_template(
-            "table.html",
+            "id_channels.html",
             title="ID Channels",
-            rows=data,
-            columns=data[0].keys() if data else [],
+            rows=rows,
+            columns=rows[0].keys() if rows else [],
         )
 
     return app
