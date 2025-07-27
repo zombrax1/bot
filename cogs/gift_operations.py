@@ -102,6 +102,17 @@ class GiftOperations(commands.Cog):
         """)
         self.conn.commit()
 
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS claim_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fid INTEGER,
+                giftcode TEXT,
+                claim_time TEXT,
+                FOREIGN KEY (giftcode) REFERENCES gift_codes (giftcode)
+            )
+        """)
+        self.conn.commit()
+
         # Add validation_status column to gift_codes table if it doesn't exist
         try:
             self.cursor.execute("ALTER TABLE gift_codes ADD COLUMN validation_status TEXT DEFAULT 'pending'")
@@ -862,6 +873,16 @@ class GiftOperations(commands.Cog):
 
                 except Exception as save_err:
                     self.logger.exception(f"GiftOps: Error saving captcha image ({filename_base}): {save_err}")
+
+        if status in ["SUCCESS", "RECEIVED", "SAME TYPE EXCHANGE"]:
+            try:
+                self.cursor.execute(
+                    "INSERT INTO claim_logs (fid, giftcode, claim_time) VALUES (?, ?, ?)",
+                    (player_id, giftcode, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+                self.conn.commit()
+            except Exception as log_err:
+                self.logger.exception(f"GiftOps: Failed to log claim: {log_err}")
 
         self.logger.info(f"GiftOps: Final status for FID {player_id} / Code '{giftcode}': {status}")
         return status
@@ -1732,6 +1753,53 @@ class GiftOperations(commands.Cog):
             )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    async def claim_report(self, interaction: discord.Interaction):
+        view = ClaimReportView(self)
+        embed = discord.Embed(
+            title="📈 Gift Claim Reports",
+            description="Select a time period",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    def build_claim_report_embed(self, timeframe: str) -> discord.Embed:
+        base_query = "SELECT fid, COUNT(*) FROM claim_logs"
+        title_suffix = "All Time"
+        if timeframe == "monthly":
+            base_query += " WHERE strftime('%Y-%m', claim_time) = strftime('%Y-%m', 'now')"
+            title_suffix = datetime.now().strftime("%B")
+        elif timeframe == "weekly":
+            base_query += " WHERE strftime('%Y-%W', claim_time) = strftime('%Y-%W', 'now')"
+            title_suffix = "This Week"
+
+        base_query += " GROUP BY fid ORDER BY COUNT(*) DESC"
+        self.cursor.execute(base_query)
+        rows = self.cursor.fetchall()
+
+        embed = discord.Embed(
+            title=f"📈 Gift Claim Report - {title_suffix}",
+            color=discord.Color.blue(),
+        )
+
+        if not rows:
+            embed.description = "No claim data available."
+            return embed
+
+        for fid, count in rows:
+            embed.add_field(
+                name=f"FID {fid}",
+                value=f"Claimed {count} codes",
+                inline=False,
+            )
+        return embed
+
+    @discord.app_commands.command(
+        name="claimreport",
+        description="Show gift claim counts per user."
+    )
+    async def claimreport_command(self, interaction: discord.Interaction):
+        await self.claim_report(interaction)
 
     async def delete_gift_code(self, interaction: discord.Interaction):
         try:
@@ -2975,6 +3043,16 @@ class GiftView(discord.ui.View):
                 )
 
     @discord.ui.button(
+        label="Claim Report",
+        emoji="📈",
+        style=discord.ButtonStyle.secondary,
+        custom_id="claim_report",
+        row=2
+    )
+    async def claim_report_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.claim_report(interaction)
+
+    @discord.ui.button(
         label="Use Gift Code for Alliance",
         emoji="🎯",
         style=discord.ButtonStyle.primary,
@@ -3278,6 +3356,28 @@ class GiftView(discord.ui.View):
                 await alliance_cog.show_main_menu(interaction)
         except:
             pass
+
+
+class ClaimReportView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+
+    async def _show_results(self, interaction: discord.Interaction, timeframe: str):
+        embed = self.cog.build_claim_report_embed(timeframe)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="All Time", style=discord.ButtonStyle.secondary, custom_id="claim_all")
+    async def report_all_time(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_results(interaction, "all")
+
+    @discord.ui.button(label="Monthly", style=discord.ButtonStyle.secondary, custom_id="claim_month")
+    async def report_month(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_results(interaction, "monthly")
+
+    @discord.ui.button(label="Weekly", style=discord.ButtonStyle.secondary, custom_id="claim_week")
+    async def report_week(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_results(interaction, "weekly")
 
 class OCRSettingsView(discord.ui.View):
     def __init__(self, cog, ocr_settings, ddddocr_available):
