@@ -15,15 +15,16 @@ BACKUP_DB_ENV = "BACKUP_DB"
 
 # Default locations
 DEFAULT_PATHS = {
-    ALLIANCE_DB_ENV: "./data/alliance.sqlite",
-    USERS_DB_ENV: "./data/users.sqlite",
-    GIFTCODE_DB_ENV: "./data/giftcode.sqlite",
-    CHANGES_DB_ENV: "./data/changes.sqlite",
-    BEARTIME_DB_ENV: "./data/beartime.sqlite",
-    SETTINGS_DB_ENV: "./data/settings.sqlite",
-    ID_CHANNEL_DB_ENV: "./data/id_channel.sqlite",
-    BACKUP_DB_ENV: "./data/backup.sqlite",
+    ALLIANCE_DB_ENV: "./db/alliance.sqlite",
+    USERS_DB_ENV: "./db/users.sqlite",
+    GIFTCODE_DB_ENV: "./db/giftcode.sqlite",
+    CHANGES_DB_ENV: "./db/changes.sqlite",
+    BEARTIME_DB_ENV: "./db/beartime.sqlite",
+    SETTINGS_DB_ENV: "./db/settings.sqlite",
+    ID_CHANNEL_DB_ENV: "./db/id_channel.sqlite",
+    BACKUP_DB_ENV: "./db/backup.sqlite",
 }
+
 
 _connections: Dict[str, sqlite3.Connection] = {}
 
