@@ -1,27 +1,53 @@
 {% extends 'base.html' %}
 {% block content %}
-<h1 class="mb-4">Dashboard</h1>
-<div class="row text-center">
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('list_alliances') }}" class="btn btn-primary btn-lg w-100">Alliance Data</a>
+<div class="row g-3">
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card text-center" style="border-radius:14px;">
+      <div class="card-body">
+        <i class="bi bi-people fs-3"></i>
+        <div class="mt-2">Alliances</div>
+        <div class="fs-4">{{ kpis.alliances }}</div>
+      </div>
+    </div>
   </div>
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('giftcode_stats') }}" class="btn btn-success btn-lg w-100">Gift Code Stats</a>
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card text-center" style="border-radius:14px;">
+      <div class="card-body">
+        <i class="bi bi-person fs-3"></i>
+        <div class="mt-2">Members</div>
+        <div class="fs-4">{{ kpis.members }}</div>
+      </div>
+    </div>
   </div>
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('notifications') }}" class="btn btn-info btn-lg w-100">Notification Schedule</a>
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card text-center" style="border-radius:14px;">
+      <div class="card-body">
+        <i class="bi bi-gift fs-3"></i>
+        <div class="mt-2">Gift Success %</div>
+        <div class="fs-4">{{ kpis.success_pct }}%</div>
+      </div>
+    </div>
   </div>
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('users') }}" class="btn btn-secondary btn-lg w-100">Users</a>
-  </div>
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('list_changes', change_type='furnace') }}" class="btn btn-warning btn-lg w-100">Furnace Changes</a>
-  </div>
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('list_changes', change_type='nickname') }}" class="btn btn-danger btn-lg w-100">Nickname Changes</a>
-  </div>
-  <div class="col-md-4 mb-3">
-    <a href="{{ url_for('id_channels') }}" class="btn btn-dark btn-lg w-100">ID Channels</a>
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card text-center" style="border-radius:14px;">
+      <div class="card-body">
+        <i class="bi bi-clock fs-3"></i>
+        <div class="mt-2">Next Run</div>
+        <div class="fs-6">{{ kpis.next_run }}</div>
+      </div>
+    </div>
   </div>
 </div>
+<div class="card mt-4" style="border-radius:14px;">
+  <div class="card-body">
+    <h5 class="card-title">Redemptions / Day</h5>
+    <canvas id="redemptionsChart" height="80"></canvas>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const ctx=document.getElementById('redemptionsChart').getContext('2d');
+new Chart(ctx,{type:'line',data:{labels:{{ chart.labels|tojson }},datasets:[{data:{{ chart.data|tojson }},borderColor:'#0d6efd',backgroundColor:'rgba(13,110,253,0.4)',tension:.3,fill:true}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+</script>
 {% endblock %}

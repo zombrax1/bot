@@ -1,5 +1,21 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import render_table %}
 {% block content %}
-{{ render_table(columns, rows) }}
+<h1 class="mb-4">{{ title }}</h1>
+<div id="grid"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+new gridjs.Grid({
+  columns: {{ columns|tojson }},
+  server: {
+    url: '{{ data_url }}',
+    then: data => data.items,
+    total: data => data.total
+  },
+  search: true,
+  sort: true,
+  pagination: { limit: 10 },
+  className: { table: 'table table-hover align-middle' }
+}).render(document.getElementById('grid'));
+</script>
 {% endblock %}
