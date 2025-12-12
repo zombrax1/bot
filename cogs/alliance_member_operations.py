@@ -58,6 +58,134 @@ class PaginationView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
+
+class MemberListPaginationView(PaginationView):
+    def __init__(self, chunks: List[discord.Embed], author_id: int, members: List[tuple],
+                 alliance_id: int, alliance_name: str, alliances_with_counts: List[tuple], cog):
+        super().__init__(chunks, author_id)
+        self.members = members
+        self.alliance_id = alliance_id
+        self.alliance_name = alliance_name
+        self.alliances_with_counts = alliances_with_counts
+        self.cog = cog
+        self.selected_fids = set()
+        self.member_select = None
+        self.update_member_select()
+
+    def _apply_selection_footer(self, embed: discord.Embed) -> discord.Embed:
+        """Annotate the embed footer with page and selection counts."""
+        selected_count = len(self.selected_fids)
+        footer_text = f"Page {self.current_page + 1}/{len(self.chunks)}"
+        if selected_count:
+            footer_text += f" • Selected: {selected_count}"
+        embed.set_footer(text=footer_text)
+        return embed
+
+    def update_member_select(self):
+        """Refresh the page-level member selector to mirror the visible members."""
+        for item in self.children[:]:
+            if isinstance(item, discord.ui.Select):
+                self.remove_item(item)
+
+        start_idx = self.current_page * 15
+        end_idx = min(start_idx + 15, len(self.members))
+        current_members = self.members[start_idx:end_idx]
+
+        options = []
+        for fid, nickname, furnace_lv, _ in current_members:
+            is_selected = fid in self.selected_fids
+            options.append(discord.SelectOption(
+                label=f"{nickname[:50]}",
+                value=str(fid),
+                description=f"ID: {fid} | FC: {self.cog.level_mapping.get(furnace_lv, str(furnace_lv))}",
+                emoji="✅" if is_selected else "👤",
+                default=is_selected
+            ))
+
+        if not options:
+            return
+
+        select = discord.ui.Select(
+            placeholder=f"👥 Select members on this page ({self.current_page + 1}/{(len(self.members) - 1) // 15 + 1})",
+            options=options,
+            max_values=len(options),
+            min_values=0,
+        )
+
+        async def select_callback(interaction: discord.Interaction):
+            # Clear selections from current page then apply new ones
+            page_fids = {fid for fid, _, _, _ in current_members}
+            self.selected_fids -= page_fids
+            for value in select.values:
+                self.selected_fids.add(int(value))
+
+            self.update_action_buttons()
+            self.update_member_select()
+            await self.update_page(interaction)
+
+        select.callback = select_callback
+        self.add_item(select)
+        self.member_select = select
+        self.update_action_buttons()
+
+    def update_action_buttons(self):
+        """Enable/disable action buttons based on selection state."""
+        has_selection = len(self.selected_fids) > 0
+        if hasattr(self, "transfer_members"):
+            self.transfer_members.disabled = not has_selection
+        if hasattr(self, "delete_members"):
+            self.delete_members.disabled = not has_selection
+
+    async def _handle_page_change(self, interaction: discord.Interaction, change: int):
+        self.current_page = max(0, min(self.current_page + change, len(self.chunks) - 1))
+        self.update_buttons()
+        self.update_member_select()
+        await self.update_page(interaction)
+
+    async def update_page(self, interaction: discord.Interaction):
+        embed = self._apply_selection_footer(self.chunks[self.current_page].copy())
+        if not interaction.response.is_done():
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.edit_original_response(embed=embed, view=self)
+
+    @discord.ui.button(label="Transfer Selected", emoji="🔄", style=discord.ButtonStyle.primary, row=2, disabled=True)
+    async def transfer_members(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_fids:
+            await interaction.response.send_message("Please select members from the list first.", ephemeral=True)
+            return
+
+        selected_members = [m for m in self.members if m[0] in self.selected_fids]
+        if not selected_members:
+            await interaction.response.send_message("Selected members are no longer available.", ephemeral=True)
+            return
+        embed, view = self.cog.create_transfer_selection_view(
+            selected_members,
+            self.alliance_name,
+            self.alliance_id,
+            self.alliances_with_counts,
+            preselected_fids=self.selected_fids,
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Delete Selected", emoji="🗑️", style=discord.ButtonStyle.danger, row=2, disabled=True)
+    async def delete_members(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_fids:
+            await interaction.response.send_message("Please select members from the list first.", ephemeral=True)
+            return
+
+        selected_members = [m for m in self.members if m[0] in self.selected_fids]
+        if not selected_members:
+            await interaction.response.send_message("Selected members are no longer available.", ephemeral=True)
+            return
+        embed, view = self.cog.create_remove_selection_view(
+            selected_members,
+            self.alliance_id,
+            self.alliance_name,
+            self.alliances_with_counts,
+            preselected_fids=self.selected_fids,
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 class MemberListView(discord.ui.View):
     def __init__(self, members: List[tuple], alliance_name: str, level_mapping: dict, author_id: int, members_per_page: int = 15):
         super().__init__(timeout=7200)
@@ -296,6 +424,358 @@ class AllianceMemberOperations(commands.Cog):
                 return emoji
         return "🔥"
 
+    def create_remove_selection_view(self, members, alliance_id, alliance_name, alliances_with_counts, preselected_fids=None):
+        max_fl = max(member[2] for member in members)
+        avg_fl = sum(member[2] for member in members) / len(members)
+
+        member_embed = discord.Embed(
+            title=f"👥 {alliance_name} -  Member Selection",
+            description=(
+                "```ml\n"
+                "Alliance Statistics\n"
+                "══════════════════════════\n"
+                f"📊 Total Member     : {len(members)}\n"
+                f"⚔️ Highest Level    : {self.level_mapping.get(max_fl, str(max_fl))}\n"
+                f"📈 Average Level    : {self.level_mapping.get(int(avg_fl), str(int(avg_fl)))}\n"
+                "══════════════════════════\n"
+                "```\n"
+                "Select the member you want to delete:"
+            ),
+            color=discord.Color.red(),
+        )
+
+        member_view = MemberSelectView(
+            members,
+            alliance_name,
+            self,
+            is_remove_operation=True,
+            alliance_id=alliance_id,
+            alliances=alliances_with_counts,
+            preselected_fids=preselected_fids
+        )
+
+        async def member_callback(member_interaction: discord.Interaction, selected_fids=None, delete_all=False):
+            # Handle multi-select or delete all
+            if delete_all or (selected_fids and len(selected_fids) == len(members)):
+                # Delete all members
+                selected_value = "all"
+                confirm_embed = discord.Embed(
+                    title="⚠️ Confirmation Required",
+                    description=f"A total of **{len(members)}** members will be deleted.\nDo you confirm?",
+                    color=discord.Color.red()
+                )
+
+                confirm_view = discord.ui.View()
+                confirm_button = discord.ui.Button(
+                    label="✅ Confirm",
+                    style=discord.ButtonStyle.danger,
+                    custom_id="confirm_all"
+                )
+                cancel_button = discord.ui.Button(
+                    label="❌ Cancel",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="cancel_all"
+                )
+
+                confirm_view.add_item(confirm_button)
+                confirm_view.add_item(cancel_button)
+
+                async def confirm_callback(confirm_interaction: discord.Interaction):
+                    if confirm_interaction.data["custom_id"] == "confirm_all":
+                        with sqlite3.connect('db/users.sqlite') as users_db:
+                            cursor = users_db.cursor()
+                            cursor.execute("SELECT fid, nickname FROM users WHERE alliance = ?", (alliance_id,))
+                            removed_members = cursor.fetchall()
+                            cursor.execute("DELETE FROM users WHERE alliance = ?", (alliance_id,))
+                            users_db.commit()
+
+                        try:
+                            with sqlite3.connect('db/settings.sqlite') as settings_db:
+                                cursor = settings_db.cursor()
+                                cursor.execute("""
+                                    SELECT channel_id
+                                    FROM alliance_logs
+                                    WHERE alliance_id = ?
+                                """, (alliance_id,))
+                                alliance_log_result = cursor.fetchone()
+
+                                if alliance_log_result and alliance_log_result[0]:
+                                    log_embed = discord.Embed(
+                                        title="🗑️ Mass Member Removal",
+                                        description=(
+                                            f"**Alliance:** {alliance_name}\n"
+                                            f"**Administrator:** {confirm_interaction.user.name} (`{confirm_interaction.user.id}`)\n"
+                                            f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                                            f"**Total Members Removed:** {len(removed_members)}\n\n"
+                                            "**Removed Members:**\n"
+                                            "```\n" +
+                                            "\n".join([f"ID{idx+1}: {fid}" for idx, (fid, _) in enumerate(removed_members[:20])]) +
+                                            (f"\n... ve {len(removed_members) - 20} ID more" if len(removed_members) > 20 else "") +
+                                            "\n```"
+                                        ),
+                                        color=discord.Color.red(),
+                                    )
+
+                                    try:
+                                        alliance_channel_id = int(alliance_log_result[0])
+                                        alliance_channel = confirm_interaction.guild.get_channel(alliance_channel_id)
+                                        if alliance_channel:
+                                            await alliance_channel.send(embed=log_embed)
+                                    except Exception:
+                                        pass
+                        except Exception as e:
+                            print(f"Error during mass deletion logging: {e}")
+
+                        success_embed = discord.Embed(
+                            title="✅ Members Deleted",
+                            description=f"Successfully deleted **{len(removed_members)}** member(s).",
+                            color=discord.Color.green(),
+                        )
+
+                        await confirm_interaction.response.edit_message(embed=success_embed, view=None)
+                        return
+
+                    cancel_embed = discord.Embed(
+                        title="❌ Cancelled",
+                        description="Deletion cancelled. No members were deleted.",
+                        color=discord.Color.orange(),
+                    )
+                    await confirm_interaction.response.edit_message(embed=cancel_embed, view=None)
+
+                async def cancel_callback(cancel_interaction: discord.Interaction):
+                    cancel_embed = discord.Embed(
+                        title="❌ Cancelled",
+                        description="Deletion cancelled. No members were deleted.",
+                        color=discord.Color.orange(),
+                    )
+                    await cancel_interaction.response.edit_message(embed=cancel_embed, view=None)
+
+                confirm_button.callback = confirm_callback
+                cancel_button.callback = cancel_callback
+
+                await member_interaction.response.edit_message(
+                    embed=confirm_embed,
+                    view=confirm_view
+                )
+                return
+
+            # For specific selections, keep existing behavior
+            selected_value = "select"
+            if not selected_fids:
+                await member_interaction.response.send_message("No members selected", ephemeral=True)
+                return
+
+            with sqlite3.connect('db/alliance.sqlite') as alliance_db:
+                cursor = alliance_db.cursor()
+                cursor.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (alliance_id,))
+                alliance_name = cursor.fetchone()[0]
+
+            with sqlite3.connect('db/users.sqlite') as users_db:
+                cursor = users_db.cursor()
+
+                if selected_value == "select":
+                    removed_members = []
+                    missing_members = []
+
+                    for selected_fid in selected_fids:
+                        cursor.execute("SELECT nickname FROM users WHERE fid = ?", (selected_fid,))
+                        result = cursor.fetchone()
+                        if not result:
+                            missing_members.append(selected_fid)
+                            continue
+
+                        nickname = result[0]
+                        cursor.execute("DELETE FROM users WHERE fid = ?", (selected_fid,))
+                        removed_members.append((selected_fid, nickname))
+
+                    users_db.commit()
+
+                    if not removed_members:
+                        await member_interaction.response.send_message("Selected members not found.", ephemeral=True)
+                        return
+
+                    if len(removed_members) == 1:
+                        selected_fid, nickname = removed_members[0]
+                        description = fix_rtl(
+                            f"👤 Member deleted successfully\n"
+                            f"🆔 ID    : {selected_fid}\n"
+                            f"🏰 Alliance: {alliance_name}\n"
+                            f"🧍‍♂️ Name  : {nickname}"
+                        )
+                    else:
+                        listed = "\n".join([f"• {nick} (ID: {fid})" for fid, nick in removed_members[:20]])
+                        if len(removed_members) > 20:
+                            listed += f"\n... and {len(removed_members) - 20} more"
+                        description = (
+                            f"✅ Deleted **{len(removed_members)}** member(s) from {alliance_name}.\n\n"
+                            f"**Removed Members:**\n{listed}"
+                        )
+
+                    if missing_members:
+                        description += f"\n\n⚠️ Skipped missing IDs: {', '.join(map(str, missing_members))}"
+
+                    success_embed = discord.Embed(
+                        title="✅ Member Deleted",
+                        description=fix_rtl(description),
+                        color=discord.Color.green(),
+                    )
+                    await member_interaction.response.edit_message(embed=success_embed, view=None)
+
+                for fid, _ in removed_members:
+                    self.log_message(
+                        f"Member removed: ID {fid}, Alliance {alliance_name}, Admin {member_interaction.user.id}"
+                    )
+
+        member_view.callback = member_callback
+        return member_embed, member_view
+
+    def create_transfer_selection_view(self, members, source_alliance_name, source_alliance_id, alliances_with_counts, preselected_fids=None):
+        max_fl = max(member[2] for member in members)
+        avg_fl = sum(member[2] for member in members) / len(members)
+
+        member_embed = discord.Embed(
+            title=f"👥 {source_alliance_name} - Member Selection",
+            description=(
+                "```ml\n"
+                "Alliance Statistics\n"
+                "══════════════════════════\n"
+                f"📊 Total Members    : {len(members)}\n"
+                f"⚔️ Highest Level    : {self.level_mapping.get(max_fl, str(max_fl))}\n"
+                f"📈 Average Level    : {self.level_mapping.get(int(avg_fl), str(int(avg_fl)))}\n"
+                "══════════════════════════\n"
+                "```\n"
+                "Select the member to transfer:\n\n"
+                "**Selection Methods**\n"
+                "1️⃣ Select member from menu below\n"
+                "2️⃣ Click 'Select by ID' button and enter ID\n"
+                "━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            color=discord.Color.blue(),
+        )
+
+        member_view = MemberSelectView(
+            members,
+            source_alliance_name,
+            self,
+            is_remove_operation=False,
+            alliance_id=source_alliance_id,
+            alliances=alliances_with_counts,
+            preselected_fids=preselected_fids
+        )
+
+        async def member_callback(member_interaction: discord.Interaction, selected_fids=None):
+            if not selected_fids:
+                await member_interaction.response.send_message("No members selected", ephemeral=True)
+                return
+
+            # Get member names for confirmation
+            with sqlite3.connect('db/users.sqlite') as users_db:
+                cursor = users_db.cursor()
+                placeholders = ','.join('?' * len(selected_fids))
+                cursor.execute(f"SELECT fid, nickname FROM users WHERE fid IN ({placeholders})", selected_fids)
+                selected_members = cursor.fetchall()
+
+            member_list = "\n".join([f"• {nickname} (ID: {fid})" for fid, nickname in selected_members[:10]])
+            if len(selected_members) > 10:
+                member_list += f"\n... and {len(selected_members) - 10} more"
+
+            target_embed = discord.Embed(
+                title="🎯 Target Alliance Selection",
+                description=(
+                    f"**Transferring {len(selected_fids)} member(s):**\n"
+                    f"{member_list}\n\n"
+                    f"Select the target alliance:"
+                ),
+                color=discord.Color.blue(),
+            )
+
+            target_options = [
+                discord.SelectOption(
+                    label=f"{name[:50]}",
+                    value=str(alliance_id),
+                    description=f"ID: {alliance_id} | Members: {count}",
+                    emoji="🏰",
+                ) for alliance_id, name, count in alliances_with_counts
+                if alliance_id != source_alliance_id
+            ]
+
+            target_select = discord.ui.Select(
+                placeholder="🎯 Select target alliance...",
+                options=target_options
+            )
+
+            target_view = discord.ui.View()
+            target_view.add_item(target_select)
+
+            async def target_callback(target_interaction: discord.Interaction):
+                target_alliance_id = int(target_select.values[0])
+
+                try:
+                    with sqlite3.connect('db/alliance.sqlite') as alliance_db:
+                        cursor = alliance_db.cursor()
+                        cursor.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (target_alliance_id,))
+                        target_alliance_name = cursor.fetchone()[0]
+
+                    # Bulk transfer
+                    with sqlite3.connect('db/users.sqlite') as users_db:
+                        cursor = users_db.cursor()
+                        placeholders = ','.join('?' * len(selected_fids))
+                        cursor.execute(
+                            f"UPDATE users SET alliance = ? WHERE fid IN ({placeholders})",
+                            [target_alliance_id] + selected_fids
+                        )
+                        users_db.commit()
+
+                    success_embed = discord.Embed(
+                        title="✅ Transfer Successful",
+                        description=(
+                            f"**Members Transferred:** {len(selected_fids)}\n"
+                            f"📤 **Source:** {source_alliance_name}\n"
+                            f"📥 **Target:** {target_alliance_name}\n\n"
+                            f"**Transferred Members:**\n{member_list}"
+                        ),
+                        color=discord.Color.green(),
+                    )
+
+                    await target_interaction.response.edit_message(
+                        embed=success_embed,
+                        view=None
+                    )
+
+                    # Log the bulk transfer
+                    self.log_message(
+                        f"Bulk transfer: {len(selected_fids)} members from {source_alliance_name} to {target_alliance_name}"
+                    )
+
+                except Exception as e:
+                    print(f"Transfer error: {e}")
+                    self.log_message(f"Bulk transfer error: {e}")
+                    error_embed = discord.Embed(
+                        title="❌ Error",
+                        description="An error occurred during the transfer operation.",
+                        color=discord.Color.red(),
+                    )
+                    await target_interaction.response.edit_message(
+                        embed=error_embed,
+                        view=None
+                    )
+
+            target_select.callback = target_callback
+            try:
+                await member_interaction.response.edit_message(
+                    embed=target_embed,
+                    view=target_view
+                )
+            except Exception:
+                await member_interaction.edit_original_response(
+                    embed=target_embed,
+                    view=target_view
+                )
+
+        member_view.callback = member_callback
+        return member_embed, member_view
+
+
     async def handle_member_operations(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="👥 Alliance Member Operations",
@@ -504,204 +984,24 @@ class AllianceMemberOperations(commands.Cog):
                             )
                             return
 
-                        max_fl = max(member[2] for member in members)
-                        avg_fl = sum(member[2] for member in members) / len(members)
-
-                        member_embed = discord.Embed(
-                            title=f"👥 {alliance_name} -  Member Selection",
-                            description=(
-                                "```ml\n"
-                                "Alliance Statistics\n"
-                                "══════════════════════════\n"
-                                f"📊 Total Member     : {len(members)}\n"
-                                f"⚔️ Highest Level    : {self.cog.level_mapping.get(max_fl, str(max_fl))}\n"
-                                f"📈 Average Level    : {self.cog.level_mapping.get(int(avg_fl), str(int(avg_fl)))}\n"
-                                "══════════════════════════\n"
-                                "```\n"
-                                "Select the member you want to delete:"
-                            ),
-                            color=discord.Color.red()
-                        )
-
-                        member_view = MemberSelectView(
+                        member_embed, member_view = self.cog.create_remove_selection_view(
                             members,
+                            alliance_id,
                             alliance_name,
-                            self.cog,
-                            is_remove_operation=True,
-                            alliance_id=alliance_id,
-                            alliances=alliances_with_counts
+                            alliances_with_counts
                         )
 
-                        async def member_callback(member_interaction: discord.Interaction, selected_fids=None, delete_all=False):
-                            # Handle multi-select or delete all
-                            if delete_all or (selected_fids and len(selected_fids) == len(members)):
-                                # Delete all members
-                                selected_value = "all"
-                                confirm_embed = discord.Embed(
-                                    title="⚠️ Confirmation Required",
-                                    description=f"A total of **{len(members)}** members will be deleted.\nDo you confirm?",
-                                    color=discord.Color.red()
-                                )
-                                
-                                confirm_view = discord.ui.View()
-                                confirm_button = discord.ui.Button(
-                                    label="✅ Confirm", 
-                                    style=discord.ButtonStyle.danger, 
-                                    custom_id="confirm_all"
-                                )
-                                cancel_button = discord.ui.Button(
-                                    label="❌ Cancel", 
-                                    style=discord.ButtonStyle.secondary, 
-                                    custom_id="cancel_all"
-                                )
-                                
-                                confirm_view.add_item(confirm_button)
-                                confirm_view.add_item(cancel_button)
-
-                                async def confirm_callback(confirm_interaction: discord.Interaction):
-                                    if confirm_interaction.data["custom_id"] == "confirm_all":
-                                        with sqlite3.connect('db/users.sqlite') as users_db:
-                                            cursor = users_db.cursor()
-                                            cursor.execute("SELECT fid, nickname FROM users WHERE alliance = ?", (alliance_id,))
-                                            removed_members = cursor.fetchall()
-                                            cursor.execute("DELETE FROM users WHERE alliance = ?", (alliance_id,))
-                                            users_db.commit()
-                                        
-                                        try:
-                                            with sqlite3.connect('db/settings.sqlite') as settings_db:
-                                                cursor = settings_db.cursor()
-                                                cursor.execute("""
-                                                    SELECT channel_id 
-                                                    FROM alliance_logs 
-                                                    WHERE alliance_id = ?
-                                                """, (alliance_id,))
-                                                alliance_log_result = cursor.fetchone()
-                                                
-                                                if alliance_log_result and alliance_log_result[0]:
-                                                    log_embed = discord.Embed(
-                                                        title="🗑️ Mass Member Removal",
-                                                        description=(
-                                                            f"**Alliance:** {alliance_name}\n"
-                                                            f"**Administrator:** {confirm_interaction.user.name} (`{confirm_interaction.user.id}`)\n"
-                                                            f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                                                            f"**Total Members Removed:** {len(removed_members)}\n\n"
-                                                            "**Removed Members:**\n"
-                                                            "```\n" + 
-                                                            "\n".join([f"ID{idx+1}: {fid}" for idx, (fid, _) in enumerate(removed_members[:20])]) +
-                                                            (f"\n... ve {len(removed_members) - 20} ID more" if len(removed_members) > 20 else "") +
-                                                            "\n```"
-                                                        ),
-                                                        color=discord.Color.red()
-                                                    )
-                                                    
-                                                    try:
-                                                        alliance_channel_id = int(alliance_log_result[0])
-                                                        alliance_log_channel = self.bot.get_channel(alliance_channel_id)
-                                                        if alliance_log_channel:
-                                                            await alliance_log_channel.send(embed=log_embed)
-                                                    except Exception as e:
-                                                        self.log_message(f"Alliance Log Sending Error: {e}")
-                                        except Exception as e:
-                                            self.log_message(f"Log record error: {e}")
-                                        
-                                        success_embed = discord.Embed(
-                                            title="✅ Members Deleted",
-                                            description=f"A total of **{len(removed_members)}** members have been successfully deleted.",
-                                            color=discord.Color.green()
-                                        )
-                                        await confirm_interaction.response.edit_message(embed=success_embed, view=None)
-                                    else:
-                                        cancel_embed = discord.Embed(
-                                            title="❌ Operation Cancelled",
-                                            description="Member deletion operation has been cancelled.",
-                                            color=discord.Color.orange()
-                                        )
-                                        await confirm_interaction.response.edit_message(embed=cancel_embed, view=None)
-
-                                confirm_button.callback = confirm_callback
-                                cancel_button.callback = confirm_callback
-                                
-                                await member_interaction.response.edit_message(
-                                    embed=confirm_embed,
-                                    view=confirm_view
-                                )
-                            
-                            elif selected_fids:
-                                # Bulk delete selected members
-                                try:
-                                    with sqlite3.connect('db/users.sqlite') as users_db:
-                                        cursor = users_db.cursor()
-                                        placeholders = ','.join('?' * len(selected_fids))
-                                        cursor.execute(f"SELECT fid, nickname FROM users WHERE fid IN ({placeholders})", selected_fids)
-                                        removed_members = cursor.fetchall()
-
-                                        cursor.execute(f"DELETE FROM users WHERE fid IN ({placeholders})", selected_fids)
-                                        users_db.commit()
-
-                                    try:
-                                        with sqlite3.connect('db/settings.sqlite') as settings_db:
-                                            cursor = settings_db.cursor()
-                                            cursor.execute("""
-                                                SELECT channel_id
-                                                FROM alliance_logs
-                                                WHERE alliance_id = ?
-                                            """, (alliance_id,))
-                                            alliance_log_result = cursor.fetchone()
-
-                                            if alliance_log_result and alliance_log_result[0]:
-                                                log_embed = discord.Embed(
-                                                    title="🗑️ Bulk Member Removal",
-                                                    description=(
-                                                        f"**Alliance:** {alliance_name}\n"
-                                                        f"**Administrator:** {member_interaction.user.name} (`{member_interaction.user.id}`)\n"
-                                                        f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                                                        f"**Total Members Removed:** {len(removed_members)}\n\n"
-                                                        "**Removed Members:**\n"
-                                                        "```\n" +
-                                                        "\n".join([f"ID{idx+1}: {fid} - {nickname}" for idx, (fid, nickname) in enumerate(removed_members[:20])]) +
-                                                        (f"\n... and {len(removed_members) - 20} more" if len(removed_members) > 20 else "") +
-                                                        "\n```"
-                                                    ),
-                                                    color=discord.Color.red()
-                                                )
-
-                                                try:
-                                                    alliance_channel_id = int(alliance_log_result[0])
-                                                    alliance_log_channel = self.bot.get_channel(alliance_channel_id)
-                                                    if alliance_log_channel:
-                                                        await alliance_log_channel.send(embed=log_embed)
-                                                except Exception as e:
-                                                    self.log_message(f"Alliance Log Sending Error: {e}")
-                                    except Exception as e:
-                                        self.log_message(f"Log record error: {e}")
-
-                                    success_embed = discord.Embed(
-                                        title="✅ Members Deleted",
-                                        description=f"Successfully deleted **{len(removed_members)}** member(s).",
-                                        color=discord.Color.green()
-                                    )
-                                    try:
-                                        await member_interaction.response.edit_message(embed=success_embed, view=None)
-                                    except:
-                                        await member_interaction.edit_original_response(embed=success_embed, view=None)
-
-                                except Exception as e:
-                                    self.log_message(f"Error in bulk member removal: {e}")
-                                    error_embed = discord.Embed(
-                                        title="❌ Error",
-                                        description="An error occurred during member removal.",
-                                        color=discord.Color.red()
-                                    )
-                                    try:
-                                        await member_interaction.response.send_message(embed=error_embed, ephemeral=True)
-                                    except:
-                                        await member_interaction.followup.send(embed=error_embed, ephemeral=True)
-
-                        member_view.callback = member_callback
-                        await interaction.response.edit_message(
-                            embed=member_embed,
-                            view=member_view
-                        )
+                        try:
+                            await interaction.response.edit_message(
+                                embed=member_embed,
+                                view=member_view
+                            )
+                        except Exception as e:
+                            self.log_message(f"Error editing message: {e}")
+                            await interaction.followup.send(
+                                "❌ An error occurred while updating the member selection menu.",
+                                ephemeral=True
+                            )
 
                     view.callback = select_callback
                     await button_interaction.response.send_message(
@@ -818,6 +1118,35 @@ class AllianceMemberOperations(commands.Cog):
                             members_per_page=15
                         )
 
+                        members_per_page = 15
+                        member_chunks = [members[i:i + members_per_page] for i in range(0, len(members), members_per_page)]
+                        embeds = []
+
+                        for page, chunk in enumerate(member_chunks):
+                            embed = public_embed.copy()
+                            
+                            member_list = ""
+                            for idx, (fid, nickname, furnace_lv, kid) in enumerate(chunk, start=page * members_per_page + 1):
+                                level = self.cog.level_mapping.get(furnace_lv, str(furnace_lv))
+                                member_list += f"👤 {nickname}\n└ ⚔ {level}\n└ 🆔 FID: {fid}\n└ 👑 State: {kid}\n\n"
+
+                            embed.description += member_list
+                            
+                            if len(member_chunks) > 1:
+                                embed.set_footer(text=f"Page {page + 1}/{len(member_chunks)}")
+                            
+                            embeds.append(embed)
+
+                        pagination_view = MemberListPaginationView(
+                            embeds,
+                            interaction.user.id,
+                            members,
+                            alliance_id,
+                            alliance_name,
+                            alliances_with_counts,
+                            self.cog
+                        )
+                        
                         await interaction.response.edit_message(
                             content="✅ Member list has been generated and posted below.",
                             embed=None,
@@ -825,6 +1154,11 @@ class AllianceMemberOperations(commands.Cog):
                         )
 
                         message = await interaction.channel.send(
+                            embed=pagination_view._apply_selection_footer(embeds[0].copy()),
+                            view=pagination_view
+                        )
+
+                        pagination_view.message = message
                             embed=member_view.current_embed,
                             view=member_view if member_view.has_controls else None
                         )
@@ -1082,149 +1416,13 @@ class AllianceMemberOperations(commands.Cog):
                                 )
                                 return
 
-                            max_fl = max(member[2] for member in members)
-                            avg_fl = sum(member[2] for member in members) / len(members)
-
-                            
-                            member_embed = discord.Embed(
-                                title=f"👥 {source_alliance_name} - Member Selection",
-                                description=(
-                                    "```ml\n"
-                                    "Alliance Statistics\n"
-                                    "══════════════════════════\n"
-                                    f"📊 Total Members    : {len(members)}\n"
-                                    f"⚔️ Highest Level    : {self.cog.level_mapping.get(max_fl, str(max_fl))}\n"
-                                    f"📈 Average Level    : {self.cog.level_mapping.get(int(avg_fl), str(int(avg_fl)))}\n"
-                                    "══════════════════════════\n"
-                                    "```\n"
-                                    "Select the member to transfer:\n\n"
-                                    "**Selection Methods**\n"
-                                    "1️⃣ Select member from menu below\n"
-                                    "2️⃣ Click 'Select by ID' button and enter ID\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━"
-                                ),
-                                color=discord.Color.blue()
-                            )
-
-                            member_view = MemberSelectView(
+                            member_embed, member_view = self.cog.create_transfer_selection_view(
                                 members,
                                 source_alliance_name,
-                                self.cog,
-                                is_remove_operation=False,
-                                alliance_id=source_alliance_id,
-                                alliances=alliances_with_counts
+                                source_alliance_id,
+                                alliances_with_counts
                             )
 
-                            async def member_callback(member_interaction: discord.Interaction, selected_fids=None):
-                                if not selected_fids:
-                                    await member_interaction.response.send_message("No members selected", ephemeral=True)
-                                    return
-
-                                # Get member names for confirmation
-                                with sqlite3.connect('db/users.sqlite') as users_db:
-                                    cursor = users_db.cursor()
-                                    placeholders = ','.join('?' * len(selected_fids))
-                                    cursor.execute(f"SELECT fid, nickname FROM users WHERE fid IN ({placeholders})", selected_fids)
-                                    selected_members = cursor.fetchall()
-
-                                member_list = "\n".join([f"• {nickname} (ID: {fid})" for fid, nickname in selected_members[:10]])
-                                if len(selected_members) > 10:
-                                    member_list += f"\n... and {len(selected_members) - 10} more"
-
-                                target_embed = discord.Embed(
-                                    title="🎯 Target Alliance Selection",
-                                    description=(
-                                        f"**Transferring {len(selected_fids)} member(s):**\n"
-                                        f"{member_list}\n\n"
-                                        f"Select the target alliance:"
-                                    ),
-                                    color=discord.Color.blue()
-                                )
-
-                                target_options = [
-                                    discord.SelectOption(
-                                        label=f"{name[:50]}",
-                                        value=str(alliance_id),
-                                        description=f"ID: {alliance_id} | Members: {count}",
-                                        emoji="🏰"
-                                    ) for alliance_id, name, count in alliances_with_counts
-                                    if alliance_id != source_alliance_id
-                                ]
-
-                                target_select = discord.ui.Select(
-                                    placeholder="🎯 Select target alliance...",
-                                    options=target_options
-                                )
-                                
-                                target_view = discord.ui.View()
-                                target_view.add_item(target_select)
-
-                                async def target_callback(target_interaction: discord.Interaction):
-                                    target_alliance_id = int(target_select.values[0])
-
-                                    try:
-                                        with sqlite3.connect('db/alliance.sqlite') as alliance_db:
-                                            cursor = alliance_db.cursor()
-                                            cursor.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (target_alliance_id,))
-                                            target_alliance_name = cursor.fetchone()[0]
-
-                                        # Bulk transfer
-                                        with sqlite3.connect('db/users.sqlite') as users_db:
-                                            cursor = users_db.cursor()
-                                            placeholders = ','.join('?' * len(selected_fids))
-                                            cursor.execute(
-                                                f"UPDATE users SET alliance = ? WHERE fid IN ({placeholders})",
-                                                [target_alliance_id] + selected_fids
-                                            )
-                                            users_db.commit()
-
-                                        success_embed = discord.Embed(
-                                            title="✅ Transfer Successful",
-                                            description=(
-                                                f"**Members Transferred:** {len(selected_fids)}\n"
-                                                f"📤 **Source:** {source_alliance_name}\n"
-                                                f"📥 **Target:** {target_alliance_name}\n\n"
-                                                f"**Transferred Members:**\n{member_list}"
-                                            ),
-                                            color=discord.Color.green()
-                                        )
-
-                                        await target_interaction.response.edit_message(
-                                            embed=success_embed,
-                                            view=None
-                                        )
-
-                                        # Log the bulk transfer
-                                        self.cog.log_message(
-                                            f"Bulk transfer: {len(selected_fids)} members from {source_alliance_name} to {target_alliance_name}"
-                                        )
-
-                                    except Exception as e:
-                                        print(f"Transfer error: {e}")
-                                        self.cog.log_message(f"Bulk transfer error: {e}")
-                                        error_embed = discord.Embed(
-                                            title="❌ Error",
-                                            description="An error occurred during the transfer operation.",
-                                            color=discord.Color.red()
-                                        )
-                                        await target_interaction.response.edit_message(
-                                            embed=error_embed,
-                                            view=None
-                                        )
-
-                                target_select.callback = target_callback
-                                try:
-                                    await member_interaction.response.edit_message(
-                                        embed=target_embed,
-                                        view=target_view
-                                    )
-                                except:
-                                    await member_interaction.edit_original_response(
-                                        embed=target_embed,
-                                        view=target_view
-                                    )
-
-                            member_view.callback = member_callback
                             await interaction.response.edit_message(
                                 embed=member_embed,
                                 view=member_view
@@ -2687,7 +2885,7 @@ class ExportFormatSelectView(discord.ui.View):
         )
 
 class MemberSelectView(discord.ui.View):
-    def __init__(self, members, source_alliance_name, cog, page=0, is_remove_operation=False, alliance_id=None, alliances=None):
+    def __init__(self, members, source_alliance_name, cog, page=0, is_remove_operation=False, alliance_id=None, alliances=None, preselected_fids=None):
         super().__init__(timeout=7200)
         self.members = members
         self.source_alliance_name = source_alliance_name
@@ -2701,7 +2899,7 @@ class MemberSelectView(discord.ui.View):
         self.alliances = alliances
         self.is_remove_operation = is_remove_operation
         self.context = "remove" if is_remove_operation else "transfer"
-        self.pending_selections = set()  # Track selected FIDs across pages
+        self.pending_selections = set(preselected_fids) if preselected_fids else set()  # Track selected FIDs across pages
 
         # Remove "Delete All" button if not in remove operation mode
         if not is_remove_operation:
