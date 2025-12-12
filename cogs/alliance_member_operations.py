@@ -58,6 +58,184 @@ class PaginationView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
+class MemberListView(discord.ui.View):
+    def __init__(self, members: List[tuple], alliance_name: str, level_mapping: dict, author_id: int, members_per_page: int = 15):
+        super().__init__(timeout=7200)
+        self.members = members
+        self.alliance_name = alliance_name
+        self.level_mapping = level_mapping
+        self.author_id = author_id
+        self.members_per_page = members_per_page
+        self.state_filter = "all"
+        self.current_page = 0
+        self.message = None
+        self.embeds: List[discord.Embed] = []
+        self.state_select = None
+
+        self._initialize_state_filter()
+        self.refresh_embeds()
+        self._update_navigation_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("You cannot use these controls.", ephemeral=True)
+            return False
+        return True
+
+    def _initialize_state_filter(self):
+        states = sorted({self._format_state(member[3]) for member in self.members})
+        if len(states) <= 1:
+            return
+
+        options = [
+            discord.SelectOption(
+                label="All States",
+                value="all",
+                description="Show members from every state",
+                emoji="🌍"
+            )
+        ]
+
+        for state in states:
+            options.append(
+                discord.SelectOption(
+                    label=f"State {state}",
+                    value=state,
+                    description=f"Only show members in state {state[:90]}",
+                    emoji="👑"
+                )
+            )
+
+        state_select = discord.ui.Select(placeholder="Filter members by state...", options=options)
+
+        async def select_callback(interaction: discord.Interaction):
+            self.state_filter = state_select.values[0]
+            self.current_page = 0
+            self.refresh_embeds()
+            await self._send_current_page(interaction)
+
+        state_select.callback = select_callback
+        self.state_select = state_select
+        self.add_item(state_select)
+
+    def refresh_embeds(self):
+        filtered_members = self._get_filtered_members()
+        if not filtered_members:
+            embed = discord.Embed(
+                title=f"👥 {self.alliance_name} - Member List",
+                description=(
+                    "**Member List**\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "No members found for the selected state."
+                ),
+                color=discord.Color.blue()
+            )
+            self.embeds = [embed]
+            self._update_navigation_buttons()
+            return
+
+        member_chunks = [
+            filtered_members[i:i + self.members_per_page]
+            for i in range(0, len(filtered_members), self.members_per_page)
+        ]
+
+        embeds = []
+        for page, chunk in enumerate(member_chunks):
+            max_fl = max(member[2] for member in filtered_members) if filtered_members else 0
+            avg_fl = sum(member[2] for member in filtered_members) / len(filtered_members) if filtered_members else 0
+
+            embed = discord.Embed(
+                title=f"👥 {self.alliance_name} - Member List",
+                description=(
+                    "```ml\n"
+                    "Alliance Statistics\n"
+                    "══════════════════════════\n"
+                    f"📊 Total Members    : {len(filtered_members)}\n"
+                    f"⚔️ Highest Level    : {self._format_level(max_fl)}\n"
+                    f"📈 Average Level    : {self._format_level(int(avg_fl) if filtered_members else 0)}\n"
+                    "══════════════════════════\n"
+                    "```\n"
+                    f"**Member List ({self._state_label()})**\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                ),
+                color=discord.Color.blue()
+            )
+
+            member_list = ""
+            for idx, (fid, nickname, furnace_lv, kid) in enumerate(chunk, start=page * self.members_per_page + 1):
+                level = self._format_level(furnace_lv)
+                state = self._format_state(kid)
+                member_list += f"👤 {nickname}\n└ ⚔ {level}\n└ 🆔 FID: {fid}\n└ 👑 State: {state}\n\n"
+
+            embed.description += member_list
+            embeds.append(embed)
+
+        self.embeds = embeds
+        self.current_page = min(self.current_page, len(self.embeds) - 1)
+        self._update_navigation_buttons()
+
+    def _get_filtered_members(self) -> List[tuple]:
+        if self.state_filter == "all":
+            return self.members
+        return [
+            member
+            for member in self.members
+            if self._format_state(member[3]) == self.state_filter
+        ]
+
+    def _state_label(self) -> str:
+        return "All States" if self.state_filter == "all" else f"State {self.state_filter}"
+
+    def _format_level(self, fl_level: int) -> str:
+        return self.level_mapping.get(fl_level, str(fl_level))
+
+    def _format_state(self, kid) -> str:
+        return str(kid) if kid is not None else "Unknown"
+
+    @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.blurple, disabled=True)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._change_page(interaction, -1)
+
+    @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.blurple)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._change_page(interaction, 1)
+
+    async def _change_page(self, interaction: discord.Interaction, delta: int):
+        self.current_page = max(0, min(self.current_page + delta, len(self.embeds) - 1))
+        self._update_navigation_buttons()
+        await self._send_current_page(interaction)
+
+    async def _send_current_page(self, interaction: discord.Interaction):
+        embed = self.current_embed
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    def _update_navigation_buttons(self):
+        self.previous_page.disabled = self.current_page == 0
+        self.next_page.disabled = self.current_page >= len(self.embeds) - 1
+        if len(self.embeds) <= 1:
+            self.previous_page.disabled = True
+            self.next_page.disabled = True
+
+    @property
+    def current_embed(self) -> discord.Embed:
+        embed = self.embeds[self.current_page]
+        if len(self.embeds) > 1:
+            embed.set_footer(text=f"Page {self.current_page + 1}/{len(self.embeds)}")
+        return embed
+
+    @property
+    def has_controls(self) -> bool:
+        return len(self.embeds) > 1 or self.state_select is not None
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
 def fix_rtl(text):
     return f"\u202B{text}\u202C"
 
@@ -619,73 +797,40 @@ class AllianceMemberOperations(commands.Cog):
                             cursor = users_db.cursor()
                             cursor.execute("""
                                 SELECT fid, nickname, furnace_lv, kid
-                                FROM users 
+                                FROM users
                                 WHERE alliance = ? 
                                 ORDER BY furnace_lv DESC, nickname
                             """, (alliance_id,))
                             members = cursor.fetchall()
-                        
+
                         if not members:
                             await interaction.response.send_message(
-                                "❌ No members found in this alliance.", 
+                                "❌ No members found in this alliance.",
                                 ephemeral=True
                             )
                             return
 
-                        max_fl = max(member[2] for member in members)
-                        avg_fl = sum(member[2] for member in members) / len(members)
-
-                        public_embed = discord.Embed(
-                            title=f"👥 {alliance_name} - Member List",
-                            description=(
-                                "```ml\n"
-                                "Alliance Statistics\n"
-                                "══════════════════════════\n"
-                                f"📊 Total Members    : {len(members)}\n"
-                                f"⚔️ Highest Level    : {self.cog.level_mapping.get(max_fl, str(max_fl))}\n"
-                                f"📈 Average Level    : {self.cog.level_mapping.get(int(avg_fl), str(int(avg_fl)))}\n"
-                                "══════════════════════════\n"
-                                "```\n"
-                                "**Member List**\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                            ),
-                            color=discord.Color.blue()
+                        member_view = MemberListView(
+                            members=members,
+                            alliance_name=alliance_name,
+                            level_mapping=self.cog.level_mapping,
+                            author_id=interaction.user.id,
+                            members_per_page=15
                         )
 
-                        members_per_page = 15
-                        member_chunks = [members[i:i + members_per_page] for i in range(0, len(members), members_per_page)]
-                        embeds = []
-
-                        for page, chunk in enumerate(member_chunks):
-                            embed = public_embed.copy()
-                            
-                            member_list = ""
-                            for idx, (fid, nickname, furnace_lv, kid) in enumerate(chunk, start=page * members_per_page + 1):
-                                level = self.cog.level_mapping.get(furnace_lv, str(furnace_lv))
-                                member_list += f"👤 {nickname}\n└ ⚔ {level}\n└ 🆔 FID: {fid}\n└ 👑 State: {kid}\n\n"
-
-                            embed.description += member_list
-                            
-                            if len(member_chunks) > 1:
-                                embed.set_footer(text=f"Page {page + 1}/{len(member_chunks)}")
-                            
-                            embeds.append(embed)
-
-                        pagination_view = PaginationView(embeds, interaction.user.id)
-                        
                         await interaction.response.edit_message(
                             content="✅ Member list has been generated and posted below.",
                             embed=None,
                             view=None
                         )
-                        
+
                         message = await interaction.channel.send(
-                            embed=embeds[0],
-                            view=pagination_view if len(embeds) > 1 else None
+                            embed=member_view.current_embed,
+                            view=member_view if member_view.has_controls else None
                         )
-                        
-                        if pagination_view:
-                            pagination_view.message = message
+
+                        if member_view.has_controls:
+                            member_view.message = message
 
                     view.callback = select_callback
                     await button_interaction.response.send_message(
