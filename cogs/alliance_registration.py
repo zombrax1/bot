@@ -6,9 +6,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from .pimp_my_bot import theme
-from .login_handler import LoginHandler
 from .alliance import check_alliance_state
-from .gift_state_resolver import verify_add_state
+from .gift_state_resolver import verify_add_state, get_alliance_kid
+from .bot_level_mapping import parse_state
 
 logger = logging.getLogger('alliance')
 
@@ -111,18 +111,6 @@ class AllianceRegistration(commands.Cog):
             for alliance_id, name in alliances if current.lower() in name.lower()
         ][:25]
 
-    async def fetch_user(self, fid: int):
-        result = await LoginHandler().fetch_player_data(str(fid))
-
-        if result['status'] == 'success':
-            return {"msg": "success", "data": result['data']}
-        elif result['status'] == 'rate_limited':
-            raise Exception("RATE_LIMITED")
-        elif result['status'] == 'not_found':
-            return {"msg": "role not exist"}
-        else:
-            raise Exception(result.get('error_message', 'Failed to fetch user data'))
-
     def _alliance_exists(self, alliance_id: int) -> bool:
         with sqlite3.connect("db/alliance.sqlite", timeout=30.0) as conn:
             return conn.execute(
@@ -174,11 +162,13 @@ class AllianceRegistration(commands.Cog):
     )
     @discord.app_commands.describe(
         fid="Your In-Game ID",
-        alliance="Your Alliance Name"
+        alliance="Your Alliance Name",
+        state="Your state number - only needed if your alliance spans several states",
     )
     @discord.app_commands.rename(fid="id")
     @discord.app_commands.autocomplete(alliance=alliance_autocomplete)
-    async def register(self, interaction: discord.Interaction, fid: int, alliance: int):
+    async def register(self, interaction: discord.Interaction, fid: int, alliance: int,
+                       state: "int | None" = None):
         if not self.is_registration_enabled():
             await interaction.response.send_message(
                 f"{theme.deniedIcon} Registration is currently disabled.",
@@ -236,11 +226,23 @@ class AllianceRegistration(commands.Cog):
 
         # Resolve state with one probe; defer first since it's slow.
         await interaction.response.defer(ephemeral=True)
-        gift_cog = self.bot.get_cog("GiftOperations")
-        if gift_cog is not None:
-            kid, verified = await verify_add_state(gift_cog, fid, alliance)
+        if state is not None:
+            kid = parse_state(state)
+            if kid is None:
+                await interaction.followup.send(
+                    f"{theme.deniedIcon} `{state}` isn't a state number. "
+                    f"Enter digits only, like `911`.", ephemeral=True)
+                return
         else:
-            kid, verified = None, False
+            gift_cog = self.bot.get_cog("GiftOperations")
+            kid = (await verify_add_state(gift_cog, fid, alliance))[0] if gift_cog else None
+            # No home state to inherit or confirm against, so we can't work it out.
+            if kid is None and await asyncio.to_thread(get_alliance_kid, alliance) is None:
+                await interaction.followup.send(
+                    f"{theme.infoIcon} This alliance has members in several states, so "
+                    f"we can't tell which one you're in. Run `/register` again and fill in "
+                    f"the **state** option with your state number.", ephemeral=True)
+                return
 
         state_error = check_alliance_state(alliance, kid)
         if state_error:

@@ -13,18 +13,55 @@ from datetime import datetime
 import os
 import csv
 import io
-from .login_handler import LoginHandler
 from .permission_handler import PermissionManager
 from .pimp_my_bot import theme, safe_edit_message, disable_expired_view
 from .process_queue import MEMBER_ADD, PreemptedException
-from .bot_level_mapping import LEVEL_MAPPING
+from .bot_level_mapping import LEVEL_MAPPING, parse_furnace_level
 from .alliance import resolve_alliance_kid, state_lock_reason, STATE_CHECK_UNAVAILABLE
 from .gift_state_resolver import verify_add_state
+from .alliance_member_edit import (
+    BulkMemberEditModal, MemberEditModal, apply_edit_lines, build_prefill,
+    edit_result_embed, enqueue_catchups, is_placeholder_name,
+)
 from . import alliance_power_changes
 
 logger = logging.getLogger('alliance')
 
 _ID_HEADERS = {"id", "fid", "player id", "player_id"}
+_NAME_HEADERS = {"name", "nickname", "player name", "player_name"}
+_LEVEL_HEADERS = {"fc_level", "fc level", "furnace", "furnace_lv", "furnace level", "level"}
+_STATE_HEADERS = {"state", "kid", "kingdom", "home state"}
+
+
+def _extract_profiles_from_csv(text: str) -> dict:
+    """{fid: (name, level, state)} from an export-shaped CSV; {} without a header row."""
+    rows = list(csv.reader(io.StringIO(text.strip())))
+    if len(rows) < 2:
+        return {}
+    header = [h.strip().lower() for h in rows[0]]
+    id_col = next((i for i, h in enumerate(header) if h in _ID_HEADERS), None)
+    if id_col is None:
+        return {}
+    name_col = next((i for i, h in enumerate(header) if h in _NAME_HEADERS), None)
+    level_col = next((i for i, h in enumerate(header) if h in _LEVEL_HEADERS), None)
+    state_col = next((i for i, h in enumerate(header) if h in _STATE_HEADERS), None)
+    if name_col is None and level_col is None and state_col is None:
+        return {}
+
+    def _cell(row, col):
+        return row[col].strip() if col is not None and len(row) > col else ""
+
+    profiles = {}
+    for row in rows[1:]:
+        if len(row) <= id_col:
+            continue
+        fid = row[id_col].strip()
+        if not fid.isdigit():
+            continue
+        name, level, state = _cell(row, name_col), _cell(row, level_col), _cell(row, state_col)
+        if name or level or state:
+            profiles[fid] = (name, level, state)
+    return profiles
 
 
 def _extract_ids_from_csv(text: str) -> list[str]:
@@ -154,6 +191,8 @@ class MemberFilterModal(discord.ui.Modal):
 
 
 class MemberListView(discord.ui.View):
+    # Subclasses that offer Edit/Bulk Edit flip this so the embed can point at them.
+    CAN_EDIT = False
     PAGE_SIZE = 20
     SORTS = [
         ("FC \u2193",      lambda m: (-m['furnace_lv'], m['nickname'].casefold()), False),
@@ -180,6 +219,7 @@ class MemberListView(discord.ui.View):
         self.filter_name = ""
         self.filter_id = ""
         self.filter_state = ""
+        self.filter_unnamed = False
         self._load_power()
         self._build_components()
 
@@ -214,7 +254,11 @@ class MemberListView(discord.ui.View):
         return True
 
     def _has_filter(self) -> bool:
-        return bool(self.filter_name or self.filter_id or self.filter_state)
+        return bool(self.filter_name or self.filter_id or self.filter_state
+                    or self.filter_unnamed)
+
+    def _unnamed(self):
+        return [m for m in self.all_members if is_placeholder_name(m['nickname'], m['fid'])]
 
     def _filtered(self):
         out = self.all_members
@@ -229,6 +273,8 @@ class MemberListView(discord.ui.View):
                 out = [m for m in out if m['kid'] == target]
             except ValueError:
                 pass
+        if self.filter_unnamed:
+            out = [m for m in out if is_placeholder_name(m['nickname'], m['fid'])]
         return out
 
     def _sorted_filtered(self):
@@ -318,6 +364,10 @@ class MemberListView(discord.ui.View):
              f"**Highest:** `{max_label}`  ·  **Avg:** `{avg_label}`"),
             f"{theme.listIcon} **Sort:** `{self.SORTS[self.sort_idx][0]}`",
         ]
+        unnamed_count = len(self._unnamed())
+        if unnamed_count:
+            hint = "  ·  select one and press Edit, or use Bulk Edit" if self.CAN_EDIT else ""
+            header.append(f"{theme.warnIcon} **Still unnamed:** `{unnamed_count}`{hint}")
         if self._has_filter():
             parts = []
             if self.filter_name:
@@ -326,6 +376,8 @@ class MemberListView(discord.ui.View):
                 parts.append(f"id~`{self.filter_id}`")
             if self.filter_state:
                 parts.append(f"state=`{self.filter_state}`")
+            if self.filter_unnamed:
+                parts.append("unnamed only")
             header.append(
                 f"{theme.searchIcon} **Filter:** {' · '.join(parts)}  →  `{total}` match"
             )
@@ -388,8 +440,71 @@ class MemberListView(discord.ui.View):
 
     async def _on_clear(self, interaction: discord.Interaction):
         self.filter_name = self.filter_id = self.filter_state = ""
+        self.filter_unnamed = False
         self.current_page = 0
         await self._rerender(interaction)
+
+    async def _on_toggle_unnamed(self, interaction: discord.Interaction):
+        self.filter_unnamed = not self.filter_unnamed
+        self.current_page = 0
+        await self._rerender(interaction)
+
+    def _reload_members(self):
+        """Re-read names/levels/state so the list shows what was just saved."""
+        try:
+            with sqlite3.connect('db/users.sqlite', timeout=30.0) as db:
+                rows = db.execute(
+                    "SELECT fid, nickname, furnace_lv, kid FROM users WHERE alliance = ?",
+                    (str(self.alliance_id),)).fetchall()
+        except sqlite3.Error as e:
+            logger.warning(f"Member list: could not reload after edit: {e}")
+            return
+        fresh = {fid: (nick or '', fl or 0, kid) for fid, nick, fl, kid in rows}
+        for m in self.all_members:
+            if m['fid'] in fresh:
+                m['nickname'], m['furnace_lv'], m['kid'] = fresh[m['fid']]
+
+    async def refresh_after_edit(self, interaction: discord.Interaction, note,
+                                 already_responded: bool = False):
+        """Redraw the list after an edit; `note` is an optional ephemeral."""
+        self._reload_members()
+        self._build_components()
+        if already_responded or interaction.response.is_done():
+            if self.message:
+                try:
+                    await self.message.edit(embed=self.build_embed(), view=self)
+                except discord.HTTPException:
+                    pass
+            return
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        if note:
+            await interaction.followup.send(f"{theme.verifiedIcon} {note}", ephemeral=True)
+
+    async def _on_edit_selected(self, interaction: discord.Interaction):
+        fid = next(iter(self.pending_selections))
+        member = next((m for m in self.all_members if m['fid'] == fid), None)
+        if member is None:
+            await interaction.response.send_message(
+                f"{theme.deniedIcon} That member is no longer in this alliance.", ephemeral=True)
+            return
+        await interaction.response.send_modal(MemberEditModal(
+            self, fid, member['nickname'], member['furnace_lv'], self.alliance_id,
+            kid=member.get('kid')))
+
+    async def _on_bulk_edit(self, interaction: discord.Interaction):
+        """Prefill from the selection, else the current page."""
+        if self.pending_selections:
+            members = [m for m in self.all_members if m['fid'] in self.pending_selections]
+        else:
+            items = self._sorted_filtered()
+            members = items[self.current_page * self.PAGE_SIZE:
+                            (self.current_page + 1) * self.PAGE_SIZE]
+        if not members:
+            await interaction.response.send_message(
+                f"{theme.deniedIcon} No members to edit in the current view.", ephemeral=True)
+            return
+        await interaction.response.send_modal(BulkMemberEditModal(
+            self, self.alliance_id, prefill=build_prefill(members)))
 
     async def _on_export(self, interaction: discord.Interaction):
         items = self._sorted_filtered()
@@ -430,6 +545,8 @@ class ManageMembersView(MemberListView):
     (Remove / Transfer / Add / Select IDs / Export) on top of the existing
     filterable list. Selection persists across pages via `pending_selections`.
     """
+
+    CAN_EDIT = True
 
     def __init__(self, members, alliance_id, alliance_name, cog, author_id,
                  alliances=None):
@@ -539,6 +656,17 @@ class ManageMembersView(MemberListView):
             clear_btn.callback = self._on_clear
             self.add_item(clear_btn)
 
+        unnamed_count = len(self._unnamed())
+        if unnamed_count or self.filter_unnamed:
+            unnamed_btn = discord.ui.Button(
+                label=f"Unnamed ({unnamed_count})", emoji=theme.warnIcon,
+                style=discord.ButtonStyle.success if self.filter_unnamed
+                else discord.ButtonStyle.secondary,
+                row=2,
+            )
+            unnamed_btn.callback = self._on_toggle_unnamed
+            self.add_item(unnamed_btn)
+
         add_btn = discord.ui.Button(
             label="Add Members", emoji=theme.addIcon,
             style=discord.ButtonStyle.success, row=2,
@@ -578,6 +706,15 @@ class ManageMembersView(MemberListView):
         transfer_btn.callback = self._on_transfer_selected
         self.add_item(transfer_btn)
 
+        edit_btn = discord.ui.Button(
+            label="Edit", emoji=theme.editListIcon,
+            style=discord.ButtonStyle.primary,
+            disabled=len(self.pending_selections) != 1,
+            row=3,
+        )
+        edit_btn.callback = self._on_edit_selected
+        self.add_item(edit_btn)
+
         import_btn = discord.ui.Button(
             label="Import", emoji=theme.importIcon,
             style=discord.ButtonStyle.success, row=3,
@@ -592,7 +729,14 @@ class ManageMembersView(MemberListView):
         export_btn.callback = self._on_export
         self.add_item(export_btn)
 
-        # Row 4: Back to alliance hub
+        # Row 4: bulk edit + back to alliance hub
+        bulk_btn = discord.ui.Button(
+            label="Bulk Edit", emoji=theme.editListIcon,
+            style=discord.ButtonStyle.primary, row=4,
+        )
+        bulk_btn.callback = self._on_bulk_edit
+        self.add_item(bulk_btn)
+
         back_btn = discord.ui.Button(
             label="Back", emoji=theme.backIcon,
             style=discord.ButtonStyle.secondary, row=4,
@@ -624,10 +768,13 @@ class ManageMembersView(MemberListView):
                 f"**Format**\n"
                 f"{theme.upperDivider}\n"
                 f"• Header row with an **`ID`** (or `FID`) column, or the bot's export file as-is.\n"
-                f"• Only the ID column is read; each member's state is resolved automatically (names and levels can't be looked up anymore).\n"
+                f"• Add a **`Name`** and/or **`FC Level`** column to set them - members already "
+                f"in the alliance get updated, new ones are added already named.\n"
+                f"• Levels take either form: `82` or `FC 10 - 2`.\n"
                 f"• A plain list of IDs (one per line or comma-separated) works too.\n"
                 f"{theme.lowerDivider}\n\n"
-                f"{theme.boltIcon} Direct file upload has no paste size limit, so large alliances can import."
+                f"{theme.boltIcon} Export this alliance, fill in the names in a spreadsheet, "
+                f"then import the file back to apply them all at once."
             ),
             color=theme.emColor1,
         )
@@ -678,9 +825,46 @@ class ManageMembersView(MemberListView):
             ))
             return
 
-        # Hand off only the ID column so the count and API lookups aren't polluted
-        # by the export's other columns (name, level, state, power).
-        await self.cog.add_user(interaction, self.alliance_id, "\n".join(fids))
+        # Existing members get updated; new IDs are added (and named) below.
+        profiles = _extract_profiles_from_csv(ids)
+        known = await asyncio.to_thread(self._known_fids)
+        existing_lines = "\n".join(
+            f"{fid}, {name}, {level}, {state}"
+            for fid, (name, level, state) in profiles.items() if fid in known
+        )
+        updated, skipped, errors, caught = (0, 0, [], 0)
+        if existing_lines:
+            updated, skipped, errors, state_fids = await asyncio.to_thread(
+                apply_edit_lines, existing_lines, self.alliance_id)
+            caught = enqueue_catchups(self.cog.bot, state_fids)
+            logger.info(f"Member import on alliance {self.alliance_id}: "
+                        f"{updated} member(s) updated from the file")
+
+        new_fids = [f for f in fids if f not in known]
+        if not new_fids:
+            await interaction.edit_original_response(
+                embed=edit_result_embed(f"{theme.importIcon} Import Complete",
+                                        updated, skipped, errors, added=0, caught=caught))
+            await self.refresh_after_edit(interaction, None, already_responded=True)
+            return
+
+        if updated or errors:
+            await interaction.followup.send(
+                embed=edit_result_embed(f"{theme.editListIcon} Existing Members Updated",
+                                        updated, skipped, errors, caught=caught),
+                ephemeral=True)
+        # Hand off only the ID column so the count isn't polluted by the export's
+        # other columns; the profiles ride along so new members land already named.
+        await self.cog.add_user(interaction, self.alliance_id, "\n".join(new_fids),
+                                profiles=profiles)
+
+    def _known_fids(self) -> set:
+        try:
+            with sqlite3.connect('db/users.sqlite', timeout=30.0) as db:
+                return {str(r[0]) for r in db.execute("SELECT fid FROM users").fetchall()}
+        except sqlite3.Error as e:
+            logger.warning(f"Member import: could not read existing IDs: {e}")
+            return set()
 
     async def _on_select_ids(self, interaction: discord.Interaction):
         await interaction.response.send_modal(IDMultiSelectModal(self))
@@ -981,9 +1165,6 @@ class AllianceMemberOperations(commands.Cog):
         if not os.path.exists(self.log_directory):
             os.makedirs(self.log_directory)
         self.log_file = os.path.join(self.log_directory, 'alliance_memberlog.txt')
-
-        # Initialize login handler for centralized API management
-        self.login_handler = LoginHandler()
 
     async def show_power_rankings_for(self, interaction: discord.Interaction, alliance_id: int):
         """Show the alliance roster sorted by Power (highest first) with last-updated timestamps."""
@@ -1429,9 +1610,11 @@ class AllianceMemberOperations(commands.Cog):
         await self._process_add_user(
             message, alliance_id, alliance_name, ids, invoker_id, invoker_name,
             process_id=process['id'], resumed_state=details.get('resumed_state'),
+            profiles=details.get('profiles'),
         )
 
-    async def add_user(self, interaction: discord.Interaction, alliance_id: str, ids: str):
+    async def add_user(self, interaction: discord.Interaction, alliance_id: str, ids: str,
+                       profiles: Optional[dict] = None):
         self.c_alliance.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (alliance_id,))
         alliance_name = self.c_alliance.fetchone()
         if alliance_name:
@@ -1494,6 +1677,7 @@ class AllianceMemberOperations(commands.Cog):
                 'ids': ids,
                 'invoker_id': interaction.user.id,
                 'invoker_name': interaction.user.name,
+                'profiles': profiles or {},
             },
         )
         process_queue.attach_runtime_context(process_id, {
@@ -1520,7 +1704,8 @@ class AllianceMemberOperations(commands.Cog):
     async def _process_add_user(self, message: Optional[discord.Message], alliance_id: str, alliance_name: str,
                                 ids: str, invoker_id: Optional[int], invoker_name: str,
                                 process_id: Optional[int] = None,
-                                resumed_state: Optional[dict] = None):
+                                resumed_state: Optional[dict] = None,
+                                profiles: Optional[dict] = None):
         progress = _MemberAddProgress(message)
         ids_list = []
         
@@ -1653,8 +1838,6 @@ class AllianceMemberOperations(commands.Cog):
                     ids_display = f"{', '.join(ids_list[:20])}... ({len(ids_list)} total)"
                 log_file.write(f"IDs to Process: {ids_display}\n")
                 log_file.write(f"Total Members to Process: {total_users}\n")
-                log_file.write(f"API Mode: {self.login_handler.get_mode_text()}\n")
-                log_file.write(f"Available APIs: {self.login_handler.available_apis}\n")
                 log_file.write(f"Operations in Queue: {self._get_queue_size()}\n")
                 log_file.write('-'*50 + '\n')
 
@@ -1741,12 +1924,16 @@ class AllianceMemberOperations(commands.Cog):
                         index += 1
                         continue
 
-                    nickname = f"Player {fid}"
+                    # State comes from the add-path check above so locks still apply;
+                    # CSV state only updates existing members.
+                    csv_name, csv_level, _csv_state = (profiles or {}).get(str(fid), ("", "", ""))
+                    nickname = csv_name.strip() or f"Player {fid}"
+                    furnace_lv = parse_furnace_level(csv_level) or 0
                     try:  # Pre-filtered, so this ID should not already exist.
                         self.c_users.execute("""
                             INSERT INTO users (fid, nickname, furnace_lv, kid, stove_lv_content, alliance)
-                            VALUES (?, ?, 0, ?, NULL, ?)
-                        """, (fid, nickname, kid, alliance_id))
+                            VALUES (?, ?, ?, ?, NULL, ?)
+                        """, (fid, nickname, furnace_lv, kid, alliance_id))
                         self.conn_users.commit()
 
                         with open(self.log_file, 'a', encoding='utf-8') as f:
@@ -1803,8 +1990,15 @@ class AllianceMemberOperations(commands.Cog):
                     await progress.edit(embed)
                     index += 1
 
+            # After the loop: a GIFT_REDEEM catch-up would preempt this MEMBER_ADD.
+            if added_users:
+                caught = enqueue_catchups(self.bot, [fid for fid, _ in added_users])
+                if caught:
+                    logger.info(f"member_add: queued code catch-up for {caught} new member(s) "
+                                f"in alliance {alliance_id}")
+
             embed.set_field_at(0, name=f"{theme.verifiedIcon} Successfully Added ({added_count}/{total_users})",
-                value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70 
+                value="User list cannot be displayed due to exceeding 70 users" if len(added_users) > 70
                 else ", ".join([nickname for _, nickname in added_users]) or "-",
                 inline=False
             )
@@ -1876,9 +2070,6 @@ class AllianceMemberOperations(commands.Cog):
                 log_file.write(f"Successfully Added: {added_count}\n")
                 log_file.write(f"Failed: {error_count}\n")
                 log_file.write(f"Already Exists: {already_exists_count}\n")
-                log_file.write(f"API Mode: {self.login_handler.get_mode_text()}\n")
-                log_file.write(f"API1 Requests: {len(self.login_handler.api1_requests)}\n")
-                log_file.write(f"API2 Requests: {len(self.login_handler.api2_requests)}\n")
                 log_file.write(f"{'='*50}\n")
 
         except PreemptedException:

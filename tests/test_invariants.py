@@ -96,7 +96,7 @@ def test_matplotlib_pyplot_imports_set_agg_backend_first():
 
 
 # ── 6. Cog registration integrity (CLAUDE.md: get_cog must match a real cog) ──
-KNOWN_NON_COG = {"LoginHandler"}  # helper looked up via get_cog with a fallback (bot_health)
+KNOWN_NON_COG: set[str] = set()  # get_cog() targets that are intentionally not registered cogs
 
 
 def _cog_load_list() -> list[str]:

@@ -25,7 +25,7 @@ def _load_bear_track():
     if str(BOT_DIR) not in sys.path:
         sys.path.insert(0, str(BOT_DIR))
     # `import cogs.bear_track` triggers the package's relative imports
-    # cleanly, including pimp_my_bot, login_handler etc.
+    # cleanly, including pimp_my_bot etc.
     import cogs.bear_track as bear_track  # type: ignore
     return bear_track
 

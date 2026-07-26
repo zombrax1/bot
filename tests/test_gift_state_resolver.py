@@ -66,18 +66,6 @@ def test_resolve_none_when_no_candidates(monkeypatch):
     assert asyncio.run(res.resolve_state(_cog(), 1, pace=0)) is None
 
 
-def test_bulk_resolves_in_parallel(monkeypatch):
-    async def probe(cog, session, fid, kid, code):
-        return "match" if kid == fid else "nomatch"  # each fid's state == its own id here
-
-    monkeypatch.setattr(res, "_candidate_kids", lambda fid: [fid])
-    monkeypatch.setattr(res, "_make_session", lambda cog: types.SimpleNamespace(close=lambda: None))
-    monkeypatch.setattr(res, "_probe", probe)
-    monkeypatch.setattr(res, "_reference_center", lambda fid: None)
-    out = asyncio.run(res.resolve_states_bulk(_cog(), [10, 20, 30], pace=0))
-    assert out == {10: 10, 20: 20, 30: 30}
-
-
 # --- transfer-window scanning (~200 IDs around the reference state) ---------------
 
 def test_window_kids_nearest_first():
@@ -183,8 +171,8 @@ def _two_dbs(monkeypatch, users_rows, alliance_rows):
     """In-memory users.sqlite + alliance.sqlite. sqlite3's context manager commits but
     does NOT close, so the same in-memory conn survives repeated `with connect(...)`."""
     users = sqlite3.connect(":memory:")
-    users.execute("CREATE TABLE users (fid INTEGER, alliance TEXT, kid INTEGER)")
-    users.executemany("INSERT INTO users VALUES (?, ?, ?)", users_rows)
+    users.execute("CREATE TABLE users (fid INTEGER, alliance TEXT, kid INTEGER, state_mismatch_at TEXT)")
+    users.executemany("INSERT INTO users (fid, alliance, kid) VALUES (?, ?, ?)", users_rows)
     users.commit()
     alliance = sqlite3.connect(":memory:")
     alliance.execute("CREATE TABLE alliance_list (alliance_id INTEGER, name TEXT, kid INTEGER, multistate INTEGER DEFAULT 0, state_locked INTEGER DEFAULT 0)")
@@ -238,7 +226,7 @@ def test_assign_alliance_kid_updates_db(monkeypatch):
     users, _ = _two_dbs(monkeypatch,
                         [(1, '5', None), (2, '5', None), (3, '6', None)],
                         [(5, 'A', 700), (6, 'B', None)])
-    assert res.assign_alliance_kid_to_missing() == 2
+    assert res.assign_alliance_kid_to_missing() == [1, 2]   # returns the fids it stated
     kids = dict(users.execute("SELECT fid, kid FROM users").fetchall())
     assert kids == {1: 700, 2: 700, 3: None}   # alliance 6 unbound -> stays NULL
 
@@ -334,6 +322,6 @@ def test_assign_skips_multistate_members(monkeypatch):
                                [(5, 'A', 700), (6, 'B', 800)])
     alliance.execute("UPDATE alliance_list SET multistate = 1, kid = NULL WHERE alliance_id = 6")
     alliance.commit()
-    assert res.assign_alliance_kid_to_missing() == 1   # only alliance 5's member
+    assert res.assign_alliance_kid_to_missing() == [1]   # only alliance 5's member
     kids = dict(users.execute("SELECT fid, kid FROM users").fetchall())
     assert kids == {1: 700, 2: None}

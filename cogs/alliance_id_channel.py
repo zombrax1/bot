@@ -12,10 +12,9 @@ import time
 from discord.ext import tasks
 from .permission_handler import PermissionManager
 from .pimp_my_bot import theme, safe_edit_message
-from .login_handler import LoginHandler
 from .bot_level_mapping import LEVEL_MAPPING
 from .alliance import check_alliance_state
-from .gift_state_resolver import verify_add_state
+from .gift_state_resolver import verify_add_state, is_multistate
 
 logger = logging.getLogger('alliance')
 
@@ -234,20 +233,21 @@ class AllianceIDChannel(commands.Cog):
                 return
 
             alliance_id = channel_info[0]
-            content = message.content.strip()
+            parts = message.content.strip().split()
 
-            if not content.isdigit():
+            if not (1 <= len(parts) <= 2) or not all(p.isdigit() for p in parts):
                 await self.warn_invalid_format(message)
                 return
 
-            fid = int(content)
-            await self.process_fid(message, fid, alliance_id)
+            fid = int(parts[0])
+            given_state = int(parts[1]) if len(parts) == 2 else None
+            await self.process_fid(message, fid, alliance_id, given_state)
 
         except Exception as e:
             logger.error(f"Error in on_message: {e}")
             print(f"Error in on_message: {e}")
 
-    async def process_fid(self, message, fid, alliance_id):
+    async def process_fid(self, message, fid, alliance_id, given_state=None):
         settings = self.get_guild_settings(message.guild.id)
         delete_after = settings['delete_after']
 
@@ -288,11 +288,26 @@ class AllianceIDChannel(commands.Cog):
                         f"{existing_alliance[0]}; allowing registration into alliance {alliance_id}"
                     )
 
-            gift_cog = self.bot.get_cog("GiftOperations")
-            if gift_cog is not None:
-                kid, verified = await verify_add_state(gift_cog, fid, alliance_id)
+            # Multistate alliance with no state given: once added they can't repost to fix
+            # it, so ask up front - post `<id> <state>` together in one message.
+            if given_state is None and is_multistate(alliance_id):
+                await message.add_reaction(theme.warnIcon)
+                await message.reply(
+                    f"{theme.infoIcon} This alliance has members in multiple states. "
+                    f"Post your ID **and** state together, e.g. `{fid} 245`.",
+                    delete_after=delete_after)
+                return
+
+            # An explicit state (the poster knows theirs) is honored; otherwise confirm
+            # against the alliance's home state with one probe.
+            if given_state is not None:
+                kid, verified = given_state, False   # self-reported, not probed
             else:
-                kid, verified = None, False
+                gift_cog = self.bot.get_cog("GiftOperations")
+                if gift_cog is not None:
+                    kid, verified = await verify_add_state(gift_cog, fid, alliance_id)
+                else:
+                    kid, verified = None, False
 
             state_error = check_alliance_state(alliance_id, kid)
             if state_error:
@@ -438,6 +453,7 @@ class AllianceIDChannel(commands.Cog):
                 description=(
                     f"Players can post their in-game ID in this channel and the "
                     f"bot will verify and add them to the alliance.\n"
+                    f"Multistate alliances: members post their ID **and** state together, e.g. `12345678 245`.\n"
                     f"{theme.upperDivider}\n"
                     f"{state_line}\n"
                     f"{theme.lowerDivider}"

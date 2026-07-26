@@ -119,26 +119,22 @@ def test_reschedule_moves_booking():
     assert rows == [("11:00",)], "old slot must be replaced by the new one"
 
 
-def test_update_time_list_survives_deleted_account():
-    """A booked FID whose game account no longer exists (API returns data=None)
-    must render as Unknown, not crash the whole list update."""
+def test_generate_time_list_survives_deleted_account():
+    """A booked FID with no stored nickname must still render (by ID),
+    not crash the whole list."""
     svs, users, alliance = _dbs()
     svs.execute("CREATE TABLE reference (context TEXT, context_id INTEGER)")
     svs.commit()
 
     cog = ms.MinisterSchedule.__new__(ms.MinisterSchedule)
     cog.svs_cursor = svs.cursor()
+    cog.users_cursor = users.cursor()
     cog.alliance_cursor = alliance.cursor()
 
-    async def fetch(fid):
-        return {"data": None}  # not_found account
-
-    cog.fetch_user_data = fetch
-
-    time_list, booked = asyncio.run(cog.update_time_list({"00:00": (123, 5)}))
+    time_list, booked = cog.generate_time_list({"00:00": (123, 5)})
 
     joined = "\n".join(time_list)
-    assert "Unknown" in joined and "123" in joined
+    assert "123" in joined
 
 
 def test_unregistered_user_reports_cleanly():

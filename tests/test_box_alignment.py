@@ -132,7 +132,7 @@ def test_attachment_uses_box_align_for_cyrillic(monkeypatch):
         return cyr_boxed if lang == "cyrillic" else en_boxed
 
     monkeypatch.setattr(bt, "ocr_bytes_with_boxes", fake_boxes)
-    monkeypatch.setattr(cog, "_acquire_ocr_slot", lambda *a, **k: _NullCtx())
+    monkeypatch.setattr(bt, "_get_ocr_semaphore", lambda: _NullCtx())
 
     roster = [(1, "ксюха")]
     res = asyncio.run(cog._ocr_attachment_to_result(
