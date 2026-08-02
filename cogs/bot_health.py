@@ -13,6 +13,7 @@ import hashlib
 import aiohttp
 import zipfile
 import shutil
+from contextlib import closing
 from datetime import datetime, timezone, timedelta
 import logging
 from importlib.metadata import version as get_package_version, PackageNotFoundError
@@ -1086,9 +1087,8 @@ class BotHealth(commands.Cog):
                 return result
 
             def do_checkpoint():
-                conn = sqlite3.connect(db_path, timeout=30.0)
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                conn.close()
+                with closing(sqlite3.connect(db_path, timeout=30.0)) as conn:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, do_checkpoint)
@@ -1165,9 +1165,8 @@ class BotHealth(commands.Cog):
                 size_before = os.path.getsize(db_path)
 
                 def do_vacuum():
-                    conn = sqlite3.connect(db_path, timeout=60.0)
-                    conn.execute("VACUUM")
-                    conn.close()
+                    with closing(sqlite3.connect(db_path, timeout=60.0)) as conn:
+                        conn.execute("VACUUM")
 
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, do_vacuum)

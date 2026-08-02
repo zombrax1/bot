@@ -121,6 +121,23 @@ def test_claim_returns_no_state_when_kid_missing(monkeypatch):
     assert result == "NO_STATE"
 
 
+def test_claim_returns_db_unavailable_when_state_read_fails(monkeypatch):
+    # A DB read failure (e.g. host out of file descriptors) must NOT be reported as
+    # "no state on file" - that sends admins chasing a member problem that isn't there.
+    async def boom(cog_, fid):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(gr, "get_user_kid", boom)
+    cog = types.SimpleNamespace(
+        clean_gift_code=lambda code: code,
+        logger=logging.getLogger("test"),
+        giftlog=logging.getLogger("test.giftlog"),
+        processing_stats={"total_fids_processed": 0, "total_processing_time": 0.0},
+    )
+    result = asyncio.run(gr.claim_giftcode_rewards_wos(cog, 12345, "CODE", skip_cache=True))
+    assert result == "DB_UNAVAILABLE"
+
+
 def test_claim_redeems_when_kid_present(monkeypatch):
     async def has_kid(cog_, fid):
         return 312
@@ -225,3 +242,12 @@ def test_no_state_is_terminal_after_one_attempt(monkeypatch):
     assert claims["n"] == 1  # not retried - retrying won't conjure a state
     nickname, reason, cycles = captured["failed"][1]
     assert "NO_STATE" in reason
+
+
+def test_db_unavailable_is_terminal_with_clean_reason(monkeypatch):
+    cog, claims, captured = _setup_alliance_run(monkeypatch, "DB_UNAVAILABLE")
+    result = asyncio.run(gr.use_giftcode_for_alliance(cog, 5, "CODE"))
+    assert result is True
+    assert claims["n"] == 1  # not retried in-run - the DB won't recover mid-loop
+    nickname, reason, cycles = captured["failed"][1]
+    assert reason == "Bot couldn't read its database"

@@ -922,11 +922,8 @@ async def get_user_kid(cog, fid):
                 "SELECT kid FROM test_fid_settings WHERE test_fid = ? ORDER BY id DESC LIMIT 1",
                 (str(fid),)).fetchone()
         return trow[0] if trow and trow[0] is not None else None
-    try:
-        return await asyncio.to_thread(_query)
-    except Exception as e:
-        cog.logger.warning(f"GiftOps: could not read state for FID {fid}: {e}")
-        return None
+    # DB errors must propagate (not collapse to a false NO_STATE) - caller maps them to DB_UNAVAILABLE.
+    return await asyncio.to_thread(_query)
 
 
 async def get_alt_validation_fids(cog, exclude, limit=3):
@@ -1458,7 +1455,13 @@ async def claim_giftcode_rewards_wos(cog, player_id, giftcode, *, skip_cache: bo
                         return status
 
         # Redemption needs the player's state; it must be on file.
-        kid = await get_user_kid(cog, player_id)
+        try:
+            kid = await get_user_kid(cog, player_id)
+        except Exception as e:
+            # DB unreadable (often FD exhaustion) - not the same as a member with no state.
+            status = "DB_UNAVAILABLE"
+            cog.logger.warning(f"GiftOps: state read failed for FID {player_id} (database unavailable): {e}")
+            return status
         if kid is None:
             status = "NO_STATE"
             cog.giftlog.info(f"{datetime.now()} No state on file for ID {player_id}; cannot redeem '{giftcode}'.")
@@ -2197,7 +2200,8 @@ async def use_giftcode_for_alliance(cog, alliance_id, giftcode, process=None):
                         "SIGN_ERROR": f"{theme.lockIcon} **" + "{count}" + "** members failed due to a signature error. Something went wrong.",
                         "ERROR": f"{theme.deniedIcon} **" + "{count}" + "** members failed due to a general error. Might want to check the logs.",
                         "UNKNOWN_API_RESPONSE": f"{theme.infoIcon} **" + "{count}" + "** members failed with an unknown API response. Say what?",
-                        "CONNECTION_ERROR": f"{theme.globeIcon} **" + "{count}" + "** members failed due to bot connection issues. Did the admin trip over the cable again?"
+                        "CONNECTION_ERROR": f"{theme.globeIcon} **" + "{count}" + "** members failed due to bot connection issues. Did the admin trip over the cable again?",
+                        "DB_UNAVAILABLE": f"{theme.warnIcon} **" + "{count}" + "** members couldn't be checked because the bot couldn't open its database - a limit on this computer, not a missing state. Restart the bot and re-run; if it keeps happening, raise the host's open-file limit (macOS: ulimit -n 4096)."
                     }
 
                     base_description += "\n**Error Breakdown:**\n"
@@ -2401,6 +2405,11 @@ async def use_giftcode_for_alliance(cog, alliance_id, giftcode, process=None):
                 mark_processed = True
                 fail_reason = "Wrong state on file"
                 error_summary["STATE_MISMATCH"] = error_summary.get("STATE_MISMATCH", 0) + 1
+            elif response_status == "DB_UNAVAILABLE":
+                add_to_failed = True
+                mark_processed = True
+                fail_reason = "Bot couldn't read its database"
+                error_summary["DB_UNAVAILABLE"] = error_summary.get("DB_UNAVAILABLE", 0) + 1
             else:
                 add_to_failed = True
                 mark_processed = True
