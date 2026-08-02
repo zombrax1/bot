@@ -256,9 +256,12 @@ async def _record_batch_result(cog, batch_id, alliance_id, success):
     alliances[alliance_id]['codes_completed'] = alliances[alliance_id].get('codes_completed', 0) + 1
     codes_done = alliances[alliance_id]['codes_completed']
 
+    if not success:
+        alliances[alliance_id]['had_error'] = True
+    had_error = alliances[alliance_id].get('had_error', False)
     if codes_done >= total_codes:
-        alliances[alliance_id]['status'] = 'completed' if success else 'error'
-    elif success:
+        alliances[alliance_id]['status'] = 'completed' if not had_error else 'error'
+    elif not had_error:
         alliances[alliance_id]['status'] = 'processing'
     else:
         alliances[alliance_id]['status'] = 'error'

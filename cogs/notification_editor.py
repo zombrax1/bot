@@ -955,6 +955,12 @@ class NotificationEditor(commands.Cog):
 
         channel_id, hours, minutes, description, mention, repeat, next_notification, timezone, notification_type, event_type = result
         if "EMBED_MESSAGE" in description:
+            if not embed_results:
+                await interaction.response.send_message(
+                    f"{theme.deniedIcon} Embed data is missing for this notification.",
+                    ephemeral=True
+                )
+                return
             title, embed_description, color, image_url, thumbnail_url, footer, author, mention_message = embed_results
 
             view = EmbedDataView(self, notification_id, title, embed_description, color, image_url, thumbnail_url,
@@ -1016,6 +1022,11 @@ class NotificationEditor(commands.Cog):
                 return
         else:
             logger.warning(f"No known format matched, description is {description}")
+            await interaction.response.send_message(
+                f"{theme.deniedIcon} Could not parse this notification's format.",
+                ephemeral=True
+            )
+            return
 
         view.message = message
 

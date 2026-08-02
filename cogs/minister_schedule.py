@@ -825,7 +825,7 @@ class MinisterSchedule(commands.Cog):
                 color=theme.emColor3
             )
             embed.set_thumbnail(url=avatar_image)
-            embed.set_author(name=f"Added by {interaction.user.display_name}", icon_url=interaction.user.avatar.url)
+            embed.set_author(name=f"Added by {interaction.user.display_name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
 
             await self.send_embed_to_channel(embed)
             await interaction.followup.send(f"Added {nickname} to {time}")
@@ -965,7 +965,7 @@ class MinisterSchedule(commands.Cog):
                 color=theme.emColor2
             )
             embed.set_thumbnail(url=avatar_image)
-            embed.set_author(name=f"Removed by {interaction.user.display_name}", icon_url=interaction.user.avatar.url)
+            embed.set_author(name=f"Removed by {interaction.user.display_name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
 
             await self.send_embed_to_channel(embed)
             await interaction.followup.send(f"Removed {nickname}")
@@ -1091,7 +1091,7 @@ class MinisterSchedule(commands.Cog):
                         description=f"All appointments for {appointment_type} have been successfully removed.",
                         color=theme.emColor2
                     )
-                    embed.set_author(name=f"Cleared by {interaction.user.display_name}", icon_url=interaction.user.avatar.url)
+                    embed.set_author(name=f"Cleared by {interaction.user.display_name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
 
                     await self.send_embed_to_channel(embed)
                     await interaction.followup.send(f"{theme.verifiedIcon} Deleted all {appointment_type} appointments.")
