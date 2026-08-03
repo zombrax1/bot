@@ -822,7 +822,7 @@ class DeleteAfterModal(discord.ui.Modal):
         self.refresh = refresh  # async callable(interaction) — overrides default refresh
         self.timer_input = discord.ui.TextInput(
             label="Auto-delete delay in seconds (0-300)",
-            placeholder="10 — set 0 to keep replies forever",
+            placeholder="e.g. 10; set 0 to keep replies forever",
             default=str(current_value),
             required=True,
             max_length=3

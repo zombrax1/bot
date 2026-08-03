@@ -162,7 +162,7 @@ class AllianceRegistration(commands.Cog):
     @discord.app_commands.describe(
         fid="Your In-Game ID",
         alliance="Your Alliance Name",
-        state="Your state number - only needed if your alliance spans several states",
+        state="Your state number. Only needed if your alliance spans several states",
         name="Your in-game name",
         level="Your furnace level, like 30 or FC 10",
     )
