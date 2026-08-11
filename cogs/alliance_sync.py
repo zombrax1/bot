@@ -474,7 +474,8 @@ class AllianceSync(commands.Cog):
         if not global_admin:
             await interaction.response.send_message(f"{theme.deniedIcon} Global Admin only.", ephemeral=True)
             return
-        await interaction.response.send_message(embed=ProviderView(self).embed(), view=ProviderView(self), ephemeral=True)
+        view = ProviderView(self)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def check_agslist(self, channel, alliance_id, interaction=None, interaction_message=None, alliance_name=None, is_batch=False, batch_info=None, progress_message=None, process_id=None):
         provider = self.provider_config()
@@ -1590,6 +1591,13 @@ class ProviderView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=600)
         self.cog = cog
+        self._sync_toggle_button()
+
+    def _sync_toggle_button(self):
+        enabled = bool(self.cog.provider_config()["enabled"])
+        self.toggle.label = "Disable Sync" if enabled else "Enable Sync"
+        self.toggle.emoji = "⏸️" if enabled else "▶️"
+        self.toggle.style = discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success
 
     async def interaction_check(self, interaction):
         from .permission_handler import PermissionManager
@@ -1598,24 +1606,33 @@ class ProviderView(discord.ui.View):
             await interaction.response.send_message(f"{theme.deniedIcon} Global Admin only.", ephemeral=True)
         return allowed
 
-    def embed(self):
+    def embed(self, confirmation=None):
         c = self.cog.provider_config()
-        status = "Enabled" if c["enabled"] else "Disabled"
+        enabled = bool(c["enabled"])
+        status = "🟢 Enabled" if enabled else "🔴 Disabled"
         configured = "ZomRadar preset" if c["provider"] == "zomradar" else ("Configured" if c["url"] else "Not configured")
-        return discord.Embed(title="Player Sync Provider", description=(
+        embed = discord.Embed(title="Player Sync Provider", description=(
             f"**Status:** {status}\n**Provider:** {c['provider']} ({configured})\n"
             f"**Authentication:** {c['auth_type']}\n\n"
-            "Generic JSON providers must return a mapped members list. Credentials are read only from the configured host environment variable and are never shown here."), color=theme.emColor1)
+            "Generic JSON providers must return a mapped members list. Credentials are read only from the configured host environment variable and are never shown here."),
+            color=discord.Color.green() if enabled else discord.Color.red())
+        if confirmation:
+            embed.add_field(name="Status updated", value=confirmation, inline=False)
+        return embed
 
-    @discord.ui.button(label="Enable / Disable", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Enable Sync", emoji="▶️", style=discord.ButtonStyle.success)
     async def toggle(self, interaction, button):
+        await interaction.response.defer()
         c = self.cog.provider_config()
         if not c["enabled"] and c["provider"] == "generic" and (not c["url"] or not c["validated"]):
-            await interaction.response.send_message(f"{theme.deniedIcon} Configure and test a provider before enabling it.", ephemeral=True)
+            await interaction.followup.send(f"{theme.deniedIcon} Configure and test a provider before enabling it.", ephemeral=True)
             return
-        self.cog.cursor_settings.execute("UPDATE player_sync_provider SET enabled = ? WHERE id=1", (0 if c["enabled"] else 1,))
+        enabled = not bool(c["enabled"])
+        self.cog.cursor_settings.execute("UPDATE player_sync_provider SET enabled = ? WHERE id=1", (int(enabled),))
         self.cog.conn_settings.commit()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        self._sync_toggle_button()
+        confirmation = f"{theme.verifiedIcon} Player sync is now **{'enabled' if enabled else 'disabled'}**."
+        await interaction.edit_original_response(embed=self.embed(confirmation), view=self)
 
     @discord.ui.button(label="Configure", style=discord.ButtonStyle.primary)
     async def configure(self, interaction, button):
@@ -1623,9 +1640,10 @@ class ProviderView(discord.ui.View):
 
     @discord.ui.button(label="Test Provider", style=discord.ButtonStyle.secondary)
     async def test_provider(self, interaction, button):
+        await interaction.response.defer(ephemeral=True)
         c = self.cog.provider_config()
         if c['provider'] != 'generic' or not c['url']:
-            await interaction.response.send_message("Generic provider URL is required for this test.", ephemeral=True); return
+            await interaction.followup.send("Generic provider URL is required for this test.", ephemeral=True); return
         try:
             headers = auth_headers(c['auth_type'], c['secret_env'], c['header_name'])
             async with aiohttp.ClientSession() as session:
@@ -1634,10 +1652,10 @@ class ProviderView(discord.ui.View):
                     roster = normalize_generic_roster(await response.json(), normalize_mapping(c['mapping_json']))
             if not roster: raise ValueError('empty roster')
         except Exception:
-            await interaction.response.send_message(f"{theme.deniedIcon} Provider test failed; no data was changed.", ephemeral=True); return
+            await interaction.followup.send(f"{theme.deniedIcon} Provider test failed; no data was changed.", ephemeral=True); return
         self.cog.cursor_settings.execute("UPDATE player_sync_provider SET validated=1 WHERE id=1")
         self.cog.conn_settings.commit()
-        await interaction.response.send_message(f"{theme.verifiedIcon} Provider response and mapping validated. You may enable sync.", ephemeral=True)
+        await interaction.followup.send(f"{theme.verifiedIcon} Provider response and mapping validated. You may enable sync.", ephemeral=True)
 
     @discord.ui.button(label="Daily Time (UTC)", style=discord.ButtonStyle.primary)
     async def daily_time(self, interaction, button):
@@ -1650,10 +1668,10 @@ class ProviderModal(discord.ui.Modal, title="Configure Player Sync Provider"):
         self.cog = cog
         c = cog.provider_config()
         self.provider = discord.ui.TextInput(label="Provider: zomradar or generic", default=c["provider"], max_length=10)
-        self.url = discord.ui.TextInput(label="Generic GET URL ({state}, {alliance} optional)", default=c["url"], required=False, max_length=400)
+        self.url = discord.ui.TextInput(label="Generic GET URL (placeholders optional)", default=c["url"], required=False, max_length=400)
         self.auth = discord.ui.TextInput(label="Auth: none, bearer, api_key, basic, header", default=c["auth_type"], max_length=10)
         self.secret_env = discord.ui.TextInput(label="Secret environment variable name", default=c["secret_env"], required=False, max_length=80)
-        self.mapping = discord.ui.TextInput(label="JSON mapping (members,id,name,power,furnace,state)", default=c["mapping_json"], max_length=1000)
+        self.mapping = discord.ui.TextInput(label="JSON field mapping", default=c["mapping_json"], max_length=1000)
         for item in (self.provider, self.url, self.auth, self.secret_env, self.mapping): self.add_item(item)
 
     async def on_submit(self, interaction):
