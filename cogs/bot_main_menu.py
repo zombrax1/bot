@@ -2210,7 +2210,7 @@ class MaintenanceView(discord.ui.View):
 
         # Gate Global-Admin-only buttons by stable custom_id, not label text.
         global_only = {"check_updates", "backup_system", "bot_health", "bot_presence",
-                       "toggle_remote_ocr"}
+                       "toggle_remote_ocr", "player_sync_provider"}
         for child in self.children:
             if isinstance(child, discord.ui.Button) and child.custom_id in global_only:
                 child.disabled = not is_global
@@ -2257,6 +2257,14 @@ class MaintenanceView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error loading Backup System: {e}")
             print(f"Error loading Backup System: {e}")
+
+    @discord.ui.button(label="Player Sync", emoji=theme.refreshIcon, style=discord.ButtonStyle.primary, custom_id="player_sync_provider", row=2)
+    async def player_sync_provider(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = self.cog.bot.get_cog("AllianceSync")
+        if cog:
+            await cog.show_provider_menu(interaction)
+        else:
+            await interaction.response.send_message(f"{theme.deniedIcon} Sync module not available.", ephemeral=True)
 
     @discord.ui.button(
         label="Bot Health",

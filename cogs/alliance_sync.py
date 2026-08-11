@@ -17,6 +17,7 @@ from .pimp_my_bot import theme
 from .process_queue import ALLIANCE_SYNC, PreemptedException
 from .bot_level_mapping import LEVEL_MAPPING as level_mapping
 from .alliance_power_changes import record_change
+from .player_sync_provider import DEFAULT_MAPPING, auth_headers, normalize_generic_roster, normalize_mapping, should_run_daily
 
 
 ZOMRADAR_URL = "https://zomradar.fastapicloud.dev/api/alliance"
@@ -178,6 +179,25 @@ class AllianceSync(commands.Cog):
                 last_miss TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        self.cursor_settings.execute("""
+            CREATE TABLE IF NOT EXISTS player_sync_provider (
+                id INTEGER PRIMARY KEY CHECK (id = 1), enabled INTEGER NOT NULL DEFAULT 0,
+                provider TEXT NOT NULL DEFAULT 'zomradar', url TEXT NOT NULL DEFAULT '',
+                auth_type TEXT NOT NULL DEFAULT 'none', secret_env TEXT NOT NULL DEFAULT '',
+                header_name TEXT NOT NULL DEFAULT '', mapping_json TEXT NOT NULL DEFAULT '{}'
+                , daily_time TEXT NOT NULL DEFAULT '00:00', last_daily_date TEXT
+                , validated INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        existing_provider_cols = {r[1] for r in self.cursor_settings.execute("PRAGMA table_info(player_sync_provider)")}
+        if 'daily_time' not in existing_provider_cols:
+            self.cursor_settings.execute("ALTER TABLE player_sync_provider ADD COLUMN daily_time TEXT NOT NULL DEFAULT '00:00'")
+        if 'last_daily_date' not in existing_provider_cols:
+            self.cursor_settings.execute("ALTER TABLE player_sync_provider ADD COLUMN last_daily_date TEXT")
+        if 'validated' not in existing_provider_cols:
+            self.cursor_settings.execute("ALTER TABLE player_sync_provider ADD COLUMN validated INTEGER NOT NULL DEFAULT 0")
+        self.cursor_settings.execute("INSERT OR IGNORE INTO player_sync_provider (id, mapping_json) VALUES (1, ?)", (str(DEFAULT_MAPPING).replace("'", '"'),))
+        self.conn_settings.commit()
         self.conn_settings.commit()
 
         self.db_lock = asyncio.Lock()
@@ -425,7 +445,45 @@ class AllianceSync(commands.Cog):
         except Exception:
             pass
 
+    def provider_config(self):
+        row = self.cursor_settings.execute(
+            "SELECT enabled, provider, url, auth_type, secret_env, header_name, mapping_json, daily_time, last_daily_date, validated FROM player_sync_provider WHERE id=1"
+        ).fetchone()
+        return dict(zip(("enabled", "provider", "url", "auth_type", "secret_env", "header_name", "mapping_json", "daily_time", "last_daily_date", "validated"), row))
+
+    @tasks.loop(minutes=1)
+    async def daily_provider_sync(self):
+        """One global daily run; marker survives restarts and ignores legacy intervals."""
+        c = self.provider_config()
+        now = datetime.utcnow()
+        if not should_run_daily(c['enabled'], c['daily_time'], c['last_daily_date'], now):
+            return
+        rows = self.cursor_alliance.execute("SELECT alliance_id, channel_id FROM alliancesettings WHERE channel_id IS NOT NULL").fetchall()
+        if not rows:
+            return
+        # Mark first: a restart cannot create a duplicate external run. Failed fetches are safe/no-change.
+        self.cursor_settings.execute("UPDATE player_sync_provider SET last_daily_date=? WHERE id=1", (now.date().isoformat(),))
+        self.conn_settings.commit()
+        queue = self.bot.get_cog('ProcessQueue')
+        if queue:
+            for alliance_id, channel_id in rows:
+                queue.enqueue(action='alliance_sync', priority=ALLIANCE_SYNC, alliance_id=alliance_id, details={'channel_id': channel_id})
+
+    async def show_provider_menu(self, interaction):
+        _, global_admin = __import__('cogs.permission_handler', fromlist=['PermissionManager']).PermissionManager.is_admin(interaction.user.id)
+        if not global_admin:
+            await interaction.response.send_message(f"{theme.deniedIcon} Global Admin only.", ephemeral=True)
+            return
+        await interaction.response.send_message(embed=ProviderView(self).embed(), view=ProviderView(self), ephemeral=True)
+
     async def check_agslist(self, channel, alliance_id, interaction=None, interaction_message=None, alliance_name=None, is_batch=False, batch_info=None, progress_message=None, process_id=None):
+        provider = self.provider_config()
+        if not provider["enabled"]:
+            await self._notify_sync_unavailable(channel, interaction_message, "Alliance synchronization is disabled. No external request was made.")
+            return
+        if provider["provider"] == "generic" and not provider["url"]:
+            await self._notify_sync_unavailable(channel, interaction_message, "Alliance synchronization is not configured. No external request was made.")
+            return
         self.cursor_alliance.execute(
             "SELECT name, kid, COALESCE(multistate, 0) "
             "FROM alliance_list WHERE alliance_id = ?",
@@ -443,7 +501,7 @@ class AllianceSync(commands.Cog):
         )
 
         api_key = get_zomradar_api_key()
-        if not api_key:
+        if provider["provider"] == "zomradar" and not api_key:
             self.logger.error("AllianceSync: ZomRadar API key is missing.")
             await self._notify_sync_unavailable(
                 channel,
@@ -463,9 +521,7 @@ class AllianceSync(commands.Cog):
         if not users:
             return
 
-        queries = zomradar_queries(
-            alliance_name_from_db, alliance_state, multistate, users
-        )
+        queries = zomradar_queries(alliance_name_from_db, alliance_state, multistate, users) if provider["provider"] == "zomradar" else [(alliance_state or 0, alliance_name_from_db)]
         if not queries:
             await self._notify_sync_unavailable(
                 channel,
@@ -480,6 +536,14 @@ class AllianceSync(commands.Cog):
         async def fetch_roster(session, state, tag):
             try:
                 async with semaphore:
+                    if provider["provider"] == "generic":
+                        mapping = normalize_mapping(provider["mapping_json"])
+                        headers = auth_headers(provider["auth_type"], provider["secret_env"], provider["header_name"])
+                        url = provider["url"].format(state=state, alliance=tag)
+                        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                            if response.status != 200:
+                                return state, None, f"HTTP {response.status}"
+                            return state, normalize_generic_roster(await response.json(), mapping), None
                     async with session.get(
                         ZOMRADAR_URL,
                         params={"state": state, "alliance": tag, "api_key": api_key},
@@ -492,7 +556,7 @@ class AllianceSync(commands.Cog):
                 return state, None, "request timed out"
             except aiohttp.ClientError as error:
                 return state, None, type(error).__name__
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, KeyError):
                 return state, None, "invalid response data"
 
         connector = aiohttp.TCPConnector(family=socket.AF_INET)
@@ -1367,11 +1431,16 @@ class AllianceSync(commands.Cog):
                 process_queue_cog.register_handler('alliance_sync_manual', self.handle_alliance_sync_manual_process)
                 process_queue_cog.register_handler('alliance_sync', self.handle_alliance_sync_process)
             await self.start_alliance_checks()
+            if not self.daily_provider_sync.is_running():
+                self.daily_provider_sync.start()
             if not self.monitor_alliance_changes.is_running():
                 self.monitor_alliance_changes.start()
             self.monitor_started = True
 
     async def start_alliance_checks(self):
+        if self.provider_config()['enabled']:
+            self.logger.info("Player sync uses the global daily scheduler; legacy intervals ignored.")
+            return
         try:
             for task in self.alliance_tasks.values():
                 if not task.done():
@@ -1516,6 +1585,108 @@ class AllianceSync(commands.Cog):
             self.alliance_tasks.clear()
             self.is_running.clear()
             self.monitor_alliance_changes.restart()
+
+class ProviderView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=600)
+        self.cog = cog
+
+    async def interaction_check(self, interaction):
+        from .permission_handler import PermissionManager
+        _, allowed = PermissionManager.is_admin(interaction.user.id)
+        if not allowed:
+            await interaction.response.send_message(f"{theme.deniedIcon} Global Admin only.", ephemeral=True)
+        return allowed
+
+    def embed(self):
+        c = self.cog.provider_config()
+        status = "Enabled" if c["enabled"] else "Disabled"
+        configured = "ZomRadar preset" if c["provider"] == "zomradar" else ("Configured" if c["url"] else "Not configured")
+        return discord.Embed(title="Player Sync Provider", description=(
+            f"**Status:** {status}\n**Provider:** {c['provider']} ({configured})\n"
+            f"**Authentication:** {c['auth_type']}\n\n"
+            "Generic JSON providers must return a mapped members list. Credentials are read only from the configured host environment variable and are never shown here."), color=theme.emColor1)
+
+    @discord.ui.button(label="Enable / Disable", style=discord.ButtonStyle.secondary)
+    async def toggle(self, interaction, button):
+        c = self.cog.provider_config()
+        if not c["enabled"] and c["provider"] == "generic" and (not c["url"] or not c["validated"]):
+            await interaction.response.send_message(f"{theme.deniedIcon} Configure and test a provider before enabling it.", ephemeral=True)
+            return
+        self.cog.cursor_settings.execute("UPDATE player_sync_provider SET enabled = ? WHERE id=1", (0 if c["enabled"] else 1,))
+        self.cog.conn_settings.commit()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Configure", style=discord.ButtonStyle.primary)
+    async def configure(self, interaction, button):
+        await interaction.response.send_modal(ProviderModal(self.cog))
+
+    @discord.ui.button(label="Test Provider", style=discord.ButtonStyle.secondary)
+    async def test_provider(self, interaction, button):
+        c = self.cog.provider_config()
+        if c['provider'] != 'generic' or not c['url']:
+            await interaction.response.send_message("Generic provider URL is required for this test.", ephemeral=True); return
+        try:
+            headers = auth_headers(c['auth_type'], c['secret_env'], c['header_name'])
+            async with aiohttp.ClientSession() as session:
+                async with session.get(c['url'].format(state=0, alliance='test'), headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                    if response.status != 200: raise ValueError(f"HTTP {response.status}")
+                    roster = normalize_generic_roster(await response.json(), normalize_mapping(c['mapping_json']))
+            if not roster: raise ValueError('empty roster')
+        except Exception:
+            await interaction.response.send_message(f"{theme.deniedIcon} Provider test failed; no data was changed.", ephemeral=True); return
+        self.cog.cursor_settings.execute("UPDATE player_sync_provider SET validated=1 WHERE id=1")
+        self.cog.conn_settings.commit()
+        await interaction.response.send_message(f"{theme.verifiedIcon} Provider response and mapping validated. You may enable sync.", ephemeral=True)
+
+    @discord.ui.button(label="Daily Time (UTC)", style=discord.ButtonStyle.primary)
+    async def daily_time(self, interaction, button):
+        await interaction.response.send_modal(DailyTimeModal(self.cog))
+
+
+class ProviderModal(discord.ui.Modal, title="Configure Player Sync Provider"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        c = cog.provider_config()
+        self.provider = discord.ui.TextInput(label="Provider: zomradar or generic", default=c["provider"], max_length=10)
+        self.url = discord.ui.TextInput(label="Generic GET URL ({state}, {alliance} optional)", default=c["url"], required=False, max_length=400)
+        self.auth = discord.ui.TextInput(label="Auth: none, bearer, api_key, basic, header", default=c["auth_type"], max_length=10)
+        self.secret_env = discord.ui.TextInput(label="Secret environment variable name", default=c["secret_env"], required=False, max_length=80)
+        self.mapping = discord.ui.TextInput(label="JSON mapping (members,id,name,power,furnace,state)", default=c["mapping_json"], max_length=1000)
+        for item in (self.provider, self.url, self.auth, self.secret_env, self.mapping): self.add_item(item)
+
+    async def on_submit(self, interaction):
+        provider, auth_raw = self.provider.value.strip().lower(), self.auth.value.strip()
+        auth, _, header_name = auth_raw.lower().partition(':')
+        if provider not in ("zomradar", "generic") or auth not in ("none", "bearer", "api_key", "basic", "header"):
+            await interaction.response.send_message(f"{theme.deniedIcon} Invalid provider or authentication type.", ephemeral=True); return
+        try:
+            normalize_mapping(self.mapping.value)
+        except ValueError:
+            await interaction.response.send_message(f"{theme.deniedIcon} Invalid JSON mapping.", ephemeral=True); return
+        if provider == "generic" and not self.url.value.strip():
+            await interaction.response.send_message(f"{theme.deniedIcon} Generic provider requires a URL.", ephemeral=True); return
+        self.cog.cursor_settings.execute("UPDATE player_sync_provider SET provider=?, url=?, auth_type=?, secret_env=?, header_name=?, mapping_json=?, enabled=0, validated=0 WHERE id=1", (provider, self.url.value.strip(), auth, self.secret_env.value.strip(), header_name.strip(), self.mapping.value.strip()))
+        self.cog.conn_settings.commit()
+        await interaction.response.send_message(f"{theme.verifiedIcon} Provider saved disabled. Enable it after verifying the endpoint and mapping.", ephemeral=True)
+
+
+class DailyTimeModal(discord.ui.Modal, title="Daily Sync Time"):
+    def __init__(self, cog):
+        super().__init__(); self.cog = cog
+        self.value = discord.ui.TextInput(label="UTC time (HH:MM)", default=cog.provider_config()['daily_time'], max_length=5)
+        self.add_item(self.value)
+    async def on_submit(self, interaction):
+        value = self.value.value.strip()
+        try:
+            datetime.strptime(value, '%H:%M')
+        except ValueError:
+            await interaction.response.send_message(f"{theme.deniedIcon} Use 24-hour UTC time, e.g. 03:30.", ephemeral=True); return
+        self.cog.cursor_settings.execute("UPDATE player_sync_provider SET daily_time=? WHERE id=1", (value,))
+        self.cog.conn_settings.commit()
+        await interaction.response.send_message(f"{theme.verifiedIcon} Daily sync time saved: `{value}` UTC.", ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(AllianceSync(bot))
