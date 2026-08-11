@@ -13,6 +13,9 @@ import shutil
 import traceback
 import logging
 import asyncio
+import json
+from pathlib import Path
+import secrets
 from .permission_handler import PermissionManager
 from .pimp_my_bot import theme
 
@@ -282,6 +285,51 @@ class BackupOperations(commands.Cog):
             pass
         return sorted(backup_files, key=os.path.getmtime, reverse=True)
 
+    def _backup_path(self, filename):
+        if Path(filename).name != filename or not filename.endswith('.zip'):
+            raise ValueError("Invalid backup selection")
+        path, root = (Path(self.backup_dir) / filename).resolve(), Path(self.backup_dir).resolve()
+        if path.parent != root or not path.is_file():
+            raise ValueError("Backup is no longer available")
+        return path
+
+    def stage_restore(self, filename, password=""):
+        """Validate a listed ZIP and stage it for application at the next startup."""
+        path = self._backup_path(filename)
+        restore_id = secrets.token_hex(12)
+        staging = Path(self.backup_dir) / '.restore-staging' / restore_id
+        staging.mkdir(parents=True, exist_ok=False)
+        try:
+            opener = pyzipper.AESZipFile if password else zipfile.ZipFile
+            with opener(path, 'r') as archive:
+                if password:
+                    archive.setpassword(password.encode())
+                infos = archive.infolist()
+                names = [i.filename for i in infos if i.filename.endswith('.sqlite')]
+                if not names or len(names) != len(set(names)):
+                    raise ValueError("Backup has no valid SQLite database set")
+                for info in infos:
+                    if info.filename.endswith('.sqlite') and (Path(info.filename).name != info.filename or info.is_dir()):
+                        raise ValueError("Backup contains an unsafe database path")
+                for name in names:
+                    with archive.open(name) as source, open(staging / name, 'wb') as destination:
+                        shutil.copyfileobj(source, destination)
+            for name in names:
+                conn = sqlite3.connect(staging / name)
+                try:
+                    if conn.execute('PRAGMA integrity_check').fetchone()[0].lower() != 'ok':
+                        raise ValueError(f"Backup database failed integrity check: {name}")
+                finally:
+                    conn.close()
+            safety_name = f"pre_restore_{datetime.datetime.now():%Y%m%d_%H%M%S}.zip"
+            self._write_db_zip(str(Path(self.backup_dir) / safety_name), None, f"Safety backup before restoring {filename}.\n")
+            (Path(self.backup_dir) / '.restore-pending.json').write_text(
+                json.dumps({'restore_id': restore_id, 'files': sorted(names), 'source': filename}), encoding='utf-8')
+            return safety_name, len(names)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
     def _snapshot_dbs(self, dest_dir):
         """Snapshot every db/*.sqlite into dest_dir via SQLite's online backup API (WAL-safe)."""
         for f in os.listdir("db"):
@@ -502,6 +550,11 @@ class BackupView(discord.ui.View):
         view = BackupManageView(self.cog)
         await interaction.response.edit_message(embed=view.build_embed(), view=view)
 
+    @discord.ui.button(label="Restore Backup", emoji=f"{theme.refreshIcon}", style=discord.ButtonStyle.danger, row=1)
+    async def restore_backup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = RestoreBackupView(self.cog, interaction.user.id)
+        await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
+
     @discord.ui.button(label="Back", emoji=f"{theme.backIcon}", style=discord.ButtonStyle.secondary, row=1)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         main_menu_cog = self.cog.bot.get_cog("MainMenu")
@@ -598,6 +651,78 @@ class BackupChoiceView(discord.ui.View):
             self.cog.log_backup(str(self.user_id), False, "Manual Backup", "Local", None, "Creation failed")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+class RestoreBackupView(discord.ui.View):
+    """Picker deliberately exposes only ZIPs already present in backups/."""
+    def __init__(self, cog, user_id):
+        super().__init__(timeout=300)
+        self.cog, self.user_id, self.selected = cog, user_id, None
+        files = cog.get_backup_files()[:25]
+        if files:
+            options = [discord.SelectOption(label=os.path.basename(path)[:100], value=os.path.basename(path)) for path in files]
+            picker = discord.ui.Select(placeholder="Choose a local backup", options=options)
+            picker.callback = self._select
+            self.add_item(picker)
+        confirm = discord.ui.Button(label="Confirm Restore", style=discord.ButtonStyle.danger, disabled=not files)
+        confirm.callback = self._confirm
+        self.add_item(confirm)
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(f"{theme.deniedIcon} This is not your restore menu.", ephemeral=True)
+            return False
+        return await _global_admin_check(interaction)
+
+    def build_embed(self):
+        files = self.cog.get_backup_files()
+        return discord.Embed(
+            title=f"{theme.warnIcon} Restore Local Backup",
+            description=("Choose a dated local backup. It is validated and staged first; "
+                         "SQLite files are replaced only on the next startup.\n\n"
+                         "A `pre_restore_*.zip` safety backup is created before staging. "
+                         "This action requires the exact confirmation word and a restart." if files else
+                         "No local ZIP backups are available to restore."),
+            color=theme.emColor2)
+
+    async def _select(self, interaction):
+        self.selected = interaction.data['values'][0]
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _confirm(self, interaction):
+        if not self.selected:
+            await interaction.response.send_message(f"{theme.deniedIcon} Select a backup first.", ephemeral=True)
+            return
+        await interaction.response.send_modal(RestoreConfirmModal(self.cog, self.selected))
+
+
+class RestoreConfirmModal(discord.ui.Modal):
+    def __init__(self, cog, filename):
+        super().__init__(title="Confirm Database Restore")
+        self.cog, self.filename = cog, filename
+        self.confirmation = discord.ui.TextInput(label="Type RESTORE to confirm", required=True, max_length=7)
+        self.password = discord.ui.TextInput(label="Backup password (if encrypted)", required=False, max_length=50)
+        self.add_item(self.confirmation)
+        self.add_item(self.password)
+
+    async def on_submit(self, interaction):
+        if self.confirmation.value.strip() != 'RESTORE':
+            await interaction.response.send_message(f"{theme.deniedIcon} Restore cancelled: confirmation did not match.", ephemeral=True)
+            return
+        _, is_global = PermissionManager.is_admin(interaction.user.id)
+        if not is_global:
+            await interaction.response.send_message(f"{theme.deniedIcon} Only global admins can restore backups.", ephemeral=True)
+            return
+        try:
+            safety, count = await asyncio.to_thread(self.cog.stage_restore, self.filename, self.password.value)
+        except Exception as e:
+            logger.warning("Backup restore staging failed for %s: %s", interaction.user.id, e)
+            await interaction.response.send_message(f"{theme.deniedIcon} Restore was not staged: invalid backup or password.", ephemeral=True)
+            return
+        self.cog.log_backup(str(interaction.user.id), True, "Restore Staged", "Local", self.filename)
+        await interaction.response.send_message(
+            f"{theme.verifiedIcon} Restore staged for **{count}** SQLite file(s). Safety copy: `{safety}`. "
+            "Restart the bot now; startup will apply the staged restore before opening its databases.", ephemeral=True)
 
 
 class BackupManageView(discord.ui.View):

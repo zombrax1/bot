@@ -71,6 +71,7 @@ def _bootstrap_from_main_branch(zip_url):
 try:
     from cogs import bot_startup_display as startup
     from cogs.bot_restart import is_container, restart_process
+    from cogs.restore_pending import apply_pending_restore
 except ImportError:
     # cogs/ is missing (likely a bare main.py drop). Fetch the full source for this branch and restart.
     _bootstrap_from_main_branch(os.environ.get(
@@ -81,6 +82,12 @@ except ImportError:
     if sys.platform == "win32":
         sys.exit(0)  # .bat / user re-runs; os.execv on Windows can race with the launcher
     os.execv(sys.executable, [sys.executable] + sys.argv)
+
+try:
+    apply_pending_restore()
+except Exception as e:
+    print(f"Pending database restore was NOT applied: {e}", flush=True)
+    sys.exit(1)
 
 # Python version check
 MIN_PYTHON = (3, 11)
