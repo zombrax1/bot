@@ -1,15 +1,24 @@
+"""
+Attendance report generator. Produces charts and summaries using matplotlib.
+"""
 import discord
 from discord.ext import commands
 import sqlite3
+import logging
 from datetime import datetime
 import re
 import csv
 import io
 from io import BytesIO
 import os
-from .attendance import SessionSelectView
+from .attendance import SessionSelectView, event_type_display
+from .pimp_my_bot import theme
+
+logger = logging.getLogger('bot')
 
 try:
+    import matplotlib
+    matplotlib.use('Agg', force=False)  # non-interactive backend; avoids Tkinter (fatal off the main thread on Windows)
     import matplotlib.pyplot as plt
     import matplotlib.font_manager as fm
     import arabic_reshaper
@@ -28,21 +37,7 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
-    print("Matplotlib not available - using text attendance reports only")
-
-FC_LEVEL_MAPPING = {
-    31: "30-1", 32: "30-2", 33: "30-3", 34: "30-4",
-    35: "FC 1", 36: "FC 1-1", 37: "FC 1-2", 38: "FC 1-3", 39: "FC 1-4",
-    40: "FC 2", 41: "FC 2-1", 42: "FC 2-2", 43: "FC 2-3", 44: "FC 2-4",
-    45: "FC 3", 46: "FC 3-1", 47: "FC 3-2", 48: "FC 3-3", 49: "FC 3-4",
-    50: "FC 4", 51: "FC 4-1", 52: "FC 4-2", 53: "FC 4-3", 54: "FC 4-4",
-    55: "FC 5", 56: "FC 5-1", 57: "FC 5-2", 58: "FC 5-3", 59: "FC 5-4",
-    60: "FC 6", 61: "FC 6-1", 62: "FC 6-2", 63: "FC 6-3", 64: "FC 6-4",
-    65: "FC 7", 66: "FC 7-1", 67: "FC 7-2", 68: "FC 7-3", 69: "FC 7-4",
-    70: "FC 8", 71: "FC 8-1", 72: "FC 8-2", 73: "FC 8-3", 74: "FC 8-4",
-    75: "FC 9", 76: "FC 9-1", 77: "FC 9-2", 78: "FC 9-3", 79: "FC 9-4",
-    80: "FC 10", 81: "FC 10-1", 82: "FC 10-2", 83: "FC 10-3", 84: "FC 10-4"
-}
+    logger.info("Matplotlib not available - using text attendance reports only")
 
 EVENT_TYPE_ICONS = {
     "Foundry": "🏭",
@@ -60,40 +55,77 @@ class ExportFormatSelectView(discord.ui.View):
         self.cog = cog
         self.records = records
         self.session_info = session_info
-        
+
     @discord.ui.select(
         placeholder="Select export format...",
         options=[
-            discord.SelectOption(label="CSV", value="csv", description="Comma-separated values", emoji="📄"),
-            discord.SelectOption(label="TSV", value="tsv", description="Tab-separated values", emoji="📋"),
-            discord.SelectOption(label="HTML", value="html", description="Web page format", emoji="🌐")
+            discord.SelectOption(label="CSV", value="csv", description="Comma-separated values", emoji=theme.documentIcon),
+            discord.SelectOption(label="TSV", value="tsv", description="Tab-separated values", emoji=theme.listIcon),
+            discord.SelectOption(label="HTML", value="html", description="Web page format", emoji=theme.globeIcon)
         ]
     )
     async def format_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         await self.cog.process_export(interaction, select.values[0], self.records, self.session_info)
+
+class ChannelSelectView(discord.ui.View):
+    def __init__(self, cog, embeds, image_file=None):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.embeds = embeds
+        self.image_file = image_file
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="Select channel to post report...",
+        channel_types=[discord.ChannelType.text]
+    )
+    async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        await self.cog.post_report_to_channel(interaction, select.values[0], self.embeds, self.image_file)
 
 class AttendanceReport(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     def _get_status_emoji(self, status):
-        """Helper to get status emoji"""
-        return {"present": "✅", "absent": "❌", "not_recorded": "⚪"}.get(status, "❓")
+        """Helper to get status emoji. 'registered' is the transient pre-result
+        state used by OCR sessions before their result mail is uploaded."""
+        return {
+            "present": f"{theme.verifiedIcon}",
+            "absent": f"{theme.deniedIcon}",
+            "not_recorded": "⚪",
+            "registered": f"{theme.timeIcon}",
+        }.get(status, "❓")
 
     def _format_last_attendance(self, last_attendance):
         """Helper to format last attendance with emojis"""
         if last_attendance == "N/A" or "(" not in last_attendance:
             return last_attendance
-        
+
         replacements = [
-            ("present", "✅"), ("Present", "✅"),
-            ("absent", "❌"), ("Absent", "❌"),
+            ("present", f"{theme.verifiedIcon}"), ("Present", f"{theme.verifiedIcon}"),
+            ("absent", f"{theme.deniedIcon}"), ("Absent", f"{theme.deniedIcon}"),
             ("not_recorded", "⚪"), ("Not Recorded", "⚪"), ("not recorded", "⚪")
         ]
-        
+
         for old, new in replacements:
             last_attendance = last_attendance.replace(old, new)
         return last_attendance
+
+    def _fix_arabic_text(self, text):
+        """Fix Arabic text for proper display in text reports"""
+        if not text:
+            return text
+        if re.search(r'[\u0600-\u06FF]', text):
+            try:
+                import arabic_reshaper
+                from bidi.algorithm import get_display
+                reshaped = arabic_reshaper.reshape(text)
+                display_text = get_display(reshaped)
+                # Use LEFT-TO-RIGHT MARK to force LTR context
+                return f'\u200E{display_text}\u200E'
+            except Exception:
+                return text
+        return text
     
     def _format_date_for_table(self, date_str: str) -> str:
         """Format date string for table display"""
@@ -104,18 +136,18 @@ class AttendanceReport(commands.Cog):
                 return date_obj.strftime("%Y-%m-%d %H:%M UTC")
             else: # Already formatted or partial date
                 return date_str
-        except:
+        except Exception:
             # Fallback to original if parsing fails
             return date_str.split()[0] if date_str else "N/A"
 
-    def _create_error_embed(self, title, description, color=discord.Color.red()):
+    def _create_error_embed(self, title, description, color=theme.emColor2):
         """Helper to create error embeds"""
         return discord.Embed(title=title, description=description, color=color)
 
     def _create_back_view(self, callback):
         """Helper to create back button view"""
         view = discord.ui.View()
-        back_button = discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary)
+        back_button = discord.ui.Button(label="Back", emoji=f"{theme.backIcon}", style=discord.ButtonStyle.secondary)
         back_button.callback = callback
         view.add_item(back_button)
         return view
@@ -134,13 +166,129 @@ class AttendanceReport(commands.Cog):
             with sqlite3.connect('db/attendance.sqlite') as db:
                 cursor = db.cursor()
                 cursor.execute("""
-                    SELECT report_type FROM user_preferences 
+                    SELECT report_type FROM user_preferences
                     WHERE user_id = ?
                 """, (user_id,))
                 result = cursor.fetchone()
                 return result[0] if result else "text"
         except Exception:
             return "text"
+
+    async def get_user_sort_preference(self, user_id):
+        """Get user's sort preference"""
+        try:
+            with sqlite3.connect('db/attendance.sqlite') as db:
+                cursor = db.cursor()
+                cursor.execute("""
+                    SELECT sort_preference FROM user_preferences
+                    WHERE user_id = ?
+                """, (user_id,))
+                result = cursor.fetchone()
+                return result[0] if result else "points_desc"
+        except Exception:
+            return "points_desc"
+
+    async def set_user_sort_preference(self, user_id, sort_type):
+        """Set user's sort preference"""
+        try:
+            with sqlite3.connect('db/attendance.sqlite') as db:
+                cursor = db.cursor()
+                cursor.execute("SELECT user_id FROM user_preferences WHERE user_id = ?", (user_id,))
+                exists = cursor.fetchone()
+
+                if exists:
+                    cursor.execute("""
+                        UPDATE user_preferences
+                        SET sort_preference = ?
+                        WHERE user_id = ?
+                    """, (sort_type, user_id))
+                else:
+                    cursor.execute("""
+                        INSERT INTO user_preferences (user_id, sort_preference)
+                        VALUES (?, ?)
+                    """, (user_id, sort_type))
+
+                db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting sort preference: {e}")
+            print(f"Error setting sort preference: {e}")
+            return False
+
+    def _get_sort_function(self, sort_preference):
+        """Get sorting function based on user preference"""
+        if sort_preference == "name_asc":
+            def sort_key(record):
+                attendance_type = record[2]
+                nickname = record[1] or "Unknown"
+
+                import unicodedata
+                import re
+
+                sortable_name = re.sub(r'[༺༻༈◈彡ミ~\{\}:\[\]]+', '', nickname)
+                sortable_name = ' '.join(sortable_name.split())
+                sortable_name = unicodedata.normalize('NFC', sortable_name).lower()
+
+                type_priority = {"present": 1, "absent": 2}.get(attendance_type, 3)
+                return (type_priority, sortable_name)
+            return sort_key
+
+        elif sort_preference == "name_asc_all":
+            def sort_key(record):
+                nickname = record[1] or "Unknown"
+
+                import unicodedata
+                import re
+
+                sortable_name = re.sub(r'[༺༻༈◈彡ミ~\{\}:\[\]]+', '', nickname)
+                sortable_name = ' '.join(sortable_name.split())
+                sortable_name = unicodedata.normalize('NFC', sortable_name).lower()
+
+                return sortable_name
+            return sort_key
+
+        elif sort_preference == "last_attended_first":
+            def sort_key(record):
+                attendance_type = record[2]
+                last_attendance = record[4] or "N/A"
+                points = record[3] or 0
+
+                current_present = (attendance_type == "present")
+
+                # Determine last attendance status
+                if "Present" in last_attendance:
+                    last_status = "present"
+                elif "Absent" in last_attendance:
+                    last_status = "absent"
+                else:
+                    last_status = "not_recorded"
+
+                # Priority groups
+                if current_present:
+                    if last_status == "present":
+                        priority = 1
+                    elif last_status == "absent":
+                        priority = 2
+                    else:
+                        priority = 3
+                else:
+                    if last_status == "present":
+                        priority = 4
+                    elif last_status == "absent":
+                        priority = 5
+                    else:
+                        priority = 6
+
+                return (priority, -points)
+            return sort_key
+
+        else:
+            def sort_key(record):
+                attendance_type = record[2]
+                points = record[3] or 0
+                type_priority = {"present": 1, "absent": 2}.get(attendance_type, 3)
+                return (type_priority, -points)
+            return sort_key
 
     async def generate_csv_export(self, records, session_info):
         """Generate CSV export file"""
@@ -150,7 +298,7 @@ class AttendanceReport(commands.Cog):
         # Write metadata
         writer.writerow(['Session Name:', session_info['session_name']])
         writer.writerow(['Alliance:', session_info['alliance_name']])
-        writer.writerow(['Event Type:', session_info.get('event_type', 'Other')])
+        writer.writerow(['Event Type:', event_type_display(session_info.get('event_type') or 'Other')[0]])
         if session_info.get('event_date'):
             writer.writerow(['Event Date:', session_info['event_date'].split('T')[0] if isinstance(session_info['event_date'], str) else session_info['event_date']])
         writer.writerow(['Export Date:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
@@ -184,7 +332,7 @@ class AttendanceReport(commands.Cog):
         # Write metadata
         writer.writerow(['Session Name:', session_info['session_name']])
         writer.writerow(['Alliance:', session_info['alliance_name']])
-        writer.writerow(['Event Type:', session_info.get('event_type', 'Other')])
+        writer.writerow(['Event Type:', event_type_display(session_info.get('event_type') or 'Other')[0]])
         if session_info.get('event_date'):
             writer.writerow(['Event Date:', session_info['event_date'].split('T')[0] if isinstance(session_info['event_date'], str) else session_info['event_date']])
         writer.writerow(['Export Date:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
@@ -278,7 +426,7 @@ class AttendanceReport(commands.Cog):
     
     <div class="stats">
         <h3>Summary</h3>
-        <p><strong>Event Type:</strong> {session_info.get('event_type', 'Other')}</p>
+        <p><strong>Event Type:</strong> {event_type_display(session_info.get('event_type') or 'Other')[0]}</p>
         {'<p><strong>Event Date:</strong> ' + (session_info['event_date'].split('T')[0] if isinstance(session_info.get('event_date'), str) else str(session_info.get('event_date', ''))) + '</p>' if session_info.get('event_date') else ''}
         <p><strong>Export Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         <p><strong>Total Players:</strong> {session_info['total_players']}</p>
@@ -330,6 +478,69 @@ class AttendanceReport(commands.Cog):
         filename = f"attendance_{session_info['alliance_name'].replace(' ', '_')}_{session_info['session_name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         return discord.File(io.BytesIO(html_content.encode('utf-8')), filename=filename)
 
+    async def post_report_to_channel(self, interaction: discord.Interaction, channel, embeds, image_file=None):
+        """Post attendance report to a selected channel"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+
+            # Resolve the channel object (from AppCommandChannel to actual Channel)
+            actual_channel = interaction.guild.get_channel(channel.id)
+            if not actual_channel:
+                await interaction.followup.send(
+                    f"{theme.deniedIcon} Could not access that channel.",
+                    ephemeral=True
+                )
+                return
+
+            # Check permissions
+            if not actual_channel.permissions_for(interaction.guild.me).send_messages:
+                await interaction.followup.send(
+                    f"{theme.deniedIcon} I don't have permission to send messages in that channel.",
+                    ephemeral=True
+                )
+                return
+
+            if not actual_channel.permissions_for(interaction.user).send_messages:
+                await interaction.followup.send(
+                    f"{theme.deniedIcon} You don't have permission to send messages in that channel.",
+                    ephemeral=True
+                )
+                return
+
+            # Post the report embeds to the channel
+            if image_file:
+                # For matplotlib reports with image
+                # Need to recreate the file since it may have been consumed
+                if hasattr(image_file, 'fp'):
+                    image_file.fp.seek(0)
+                await actual_channel.send(embed=embeds[0], file=image_file)
+
+                # Post additional embeds if any (shouldn't be for matplotlib)
+                for embed in embeds[1:]:
+                    await actual_channel.send(embed=embed)
+            else:
+                # For text reports
+                for embed in embeds:
+                    await actual_channel.send(embed=embed)
+
+            await interaction.followup.send(
+                f"{theme.verifiedIcon} Attendance report posted to {actual_channel.mention}!",
+                ephemeral=True
+            )
+
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"{theme.deniedIcon} I don't have permission to post in that channel.",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error posting report to channel: {e}")
+            print(f"Error posting report to channel: {e}")
+            await interaction.followup.send(
+                f"{theme.deniedIcon} An error occurred while posting the report.",
+                ephemeral=True
+            )
+
     async def process_export(self, interaction: discord.Interaction, format_type: str, records, session_info):
         """Process export request and send file via DM"""
         try:
@@ -348,7 +559,7 @@ class AttendanceReport(commands.Cog):
                 format_name = "HTML"
             else:
                 await interaction.followup.send(
-                    "❌ Invalid export format selected.",
+                    f"{theme.deniedIcon} Invalid export format selected.",
                     ephemeral=True
                 )
                 return
@@ -356,39 +567,40 @@ class AttendanceReport(commands.Cog):
             # Try to DM the file
             try:
                 await interaction.user.send(
-                    f"📊 **Attendance Report Export**\n"
+                    f"{theme.chartIcon} **Attendance Report Export**\n"
                     f"**Format:** {format_name}\n"
                     f"**Alliance:** {session_info['alliance_name']}\n"
                     f"**Session:** {session_info['session_name']}\n"
-                    f"**Event Type:** {session_info.get('event_type', 'Other')}\n"
+                    f"**Event Type:** {event_type_display(session_info.get('event_type') or 'Other')[0]}\n"
                     f"**Total Records:** {session_info['total_players']}",
                     file=file
                 )
                 await interaction.followup.send(
-                    "✅ Attendance report sent to your DMs!",
+                    f"{theme.verifiedIcon} Attendance report sent to your DMs!",
                     ephemeral=True
                 )
             except discord.Forbidden:
                 await interaction.followup.send(
-                    "❌ Could not send DM. Please enable DMs from server members and try again.",
+                    f"{theme.deniedIcon} Could not send DM. Please enable DMs from server members and try again.",
                     ephemeral=True
                 )
             except discord.HTTPException as e:
                 if "Maximum message size" in str(e):
                     await interaction.followup.send(
-                        "❌ Report too large to send via Discord (8MB limit). Please try exporting fewer records.",
+                        f"{theme.deniedIcon} Report too large to send via Discord (8MB limit). Please try exporting fewer records.",
                         ephemeral=True
                     )
                 else:
                     await interaction.followup.send(
-                        f"❌ An error occurred while sending the report: {str(e)}",
+                        f"{theme.deniedIcon} An error occurred while sending the report: {str(e)}",
                         ephemeral=True
                     )
                     
         except Exception as e:
+            logger.error(f"Error in process_export: {e}")
             print(f"Error in process_export: {e}")
             await interaction.followup.send(
-                "❌ An error occurred while generating the export.",
+                f"{theme.deniedIcon} An error occurred while generating the export.",
                 ephemeral=True
             )
 
@@ -414,14 +626,19 @@ class AttendanceReport(commands.Cog):
                 await self.show_text_report(interaction, alliance_id, session_name, is_preview, selected_players, session_id, marking_view)
                 
         except Exception as e:
+            logger.error(f"Error showing attendance report: {e}")
             print(f"Error showing attendance report: {e}")
             import traceback
             traceback.print_exc()
-            await interaction.edit_original_response(
-                content="❌ An error occurred while generating attendance report.",
-                embed=None,
-                view=None
-            )
+            # May fail before any response was made, so branch on response state.
+            msg = f"{theme.deniedIcon} An error occurred while generating attendance report."
+            try:
+                if interaction.response.is_done():
+                    await interaction.edit_original_response(content=msg, embed=None, view=None)
+                else:
+                    await interaction.response.send_message(msg, ephemeral=True)
+            except Exception:
+                pass
 
     async def show_matplotlib_report(self, interaction: discord.Interaction, alliance_id: int, session_name: str,
                                    is_preview=False, selected_players=None, session_id=None, marking_view=None):
@@ -457,7 +674,7 @@ class AttendanceReport(commands.Cog):
                 
                 if not records:
                     await interaction.response.edit_message(
-                        content=f"❌ No attendance has been marked yet.",
+                        content=f"{theme.deniedIcon} No attendance has been marked yet.",
                         embed=None,
                         view=None
                     )
@@ -490,7 +707,7 @@ class AttendanceReport(commands.Cog):
                             ORDER BY points DESC, marked_at DESC
                         """, (str(alliance_id), session_name))
                     db_records = cursor.fetchall()
-                    
+
                     # Get session_id if not provided (needed for last event lookup)
                     if not session_id and db_records:
                         cursor.execute("""
@@ -514,7 +731,7 @@ class AttendanceReport(commands.Cog):
                             record[0], event_type, event_date, session_id
                         ) if event_type and event_date and session_id else "N/A"
                         
-                        # Format: (fid, nickname, status, points, last_event_attendance, marked_date, marked_by)
+                        # Format: (id, nickname, status, points, last_event_attendance, marked_date, marked_by)
                         records.append((
                             record[0],  # player_id
                             record[1],  # player_name
@@ -527,7 +744,7 @@ class AttendanceReport(commands.Cog):
 
                 if not records:
                     await interaction.response.edit_message(
-                        content=f"❌ No attendance records found for session '{session_name}' in {alliance_name}.",
+                        content=f"{theme.deniedIcon} No attendance records found for session '{session_name}' in {alliance_name}.",
                         embed=None,
                         view=None
                     )
@@ -538,6 +755,11 @@ class AttendanceReport(commands.Cog):
                 absent_count = sum(1 for r in records if r[2] == 'absent')
 
             not_recorded_count = 0  # We're not showing not_recorded in reports
+
+            # Apply user's sort preference
+            sort_preference = await self.get_user_sort_preference(interaction.user.id)
+            sort_key = self._get_sort_function(sort_preference)
+            records = sorted(records, key=sort_key)
 
             # Generate Matplotlib table image - different headers for preview vs full
             if is_preview:
@@ -600,61 +822,70 @@ class AttendanceReport(commands.Cog):
             fig_width = 10 if is_preview else 13
             
             fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-            ax.axis('off')
-            
-            # Format title with event type and date
-            title_text = f'Attendance Report - {alliance_name} | {session_name}'
-            if event_type:
-                title_text += f' [{event_type}]'
-            if event_date:
-                # Extract just the date part if it's a datetime string
-                date_str = event_date.split('T')[0] if 'T' in str(event_date) else str(event_date).split()[0]
-                title_text += f' | Date: {date_str}'
-            
-            ax.text(0.5, 0.98, title_text, 
-                   transform=ax.transAxes, fontsize=16 if not is_preview else 14, color=table_color, 
-                   ha='center', va='top', weight='bold')
-            
-            # Create table with adjusted position to avoid title overlap
-            table = ax.table(
-                cellText=table_data,
-                colLabels=headers,
-                cellLoc='left',
-                loc='upper center',
-                bbox=[0, -0.05, 1, 0.90],  # Move down and reduce height to avoid title
-                colColours=[table_color]*len(headers)
-            )
-            table.auto_set_font_size(False)
-            table.set_fontsize(12)
-            table.scale(1, 1.5)
-            
-            # Set larger width for columns - only for full report
-            if not is_preview:
-                nrows = len(table_data) + 1
-                for row in range(nrows):
-                    cell = table[(row, 2)]
-                    cell.set_width(0.35)
-                    cell = table[(row, 4)]
-                    cell.set_width(0.25)
+            # Close in finally so an error mid-render (table build / savefig)
+            # never leaks the figure — matplotlib figures are process-global.
+            try:
+                ax.axis('off')
 
-            img_buffer = BytesIO()
-            plt.savefig(img_buffer, format='png', bbox_inches='tight')
-            plt.close(fig)
+                # Format title with event type and date
+                title_text = f'Attendance Report - {alliance_name} | {session_name}'
+                if event_type:
+                    title_text += f' [{event_type_display(event_type)[0]}]'
+                if event_date:
+                    if isinstance(event_date, str):
+                        date_str = event_date.split('T')[0] if 'T' in event_date else event_date.split()[0]
+                    else:
+                        try:
+                            date_str = event_date.strftime("%Y-%m-%d")
+                        except Exception:
+                            date_str = str(event_date)
+                    title_text += f' | Date: {date_str}'
+
+                ax.text(0.5, 0.98, title_text,
+                       transform=ax.transAxes, fontsize=16 if not is_preview else 14, color=table_color,
+                       ha='center', va='top', weight='bold')
+
+                # Create table with adjusted position to avoid title overlap
+                table = ax.table(
+                    cellText=table_data,
+                    colLabels=headers,
+                    cellLoc='left',
+                    loc='upper center',
+                    bbox=[0, -0.05, 1, 0.90],  # Move down and reduce height to avoid title
+                    colColours=[table_color]*len(headers)
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(12)
+                table.scale(1, 1.5)
+
+                # Set larger width for columns - only for full report
+                if not is_preview:
+                    nrows = len(table_data) + 1
+                    for row in range(nrows):
+                        cell = table[(row, 2)]
+                        cell.set_width(0.35)
+                        cell = table[(row, 4)]
+                        cell.set_width(0.25)
+
+                img_buffer = BytesIO()
+                plt.savefig(img_buffer, format='png', bbox_inches='tight')
+            finally:
+                plt.close(fig)
             img_buffer.seek(0)
 
             file = discord.File(img_buffer, filename="attendance_report.png")
 
             # Format embed title with event type
-            embed_title = f"📊 Attendance Report - {alliance_name}"
+            embed_title = f"{theme.chartIcon} Attendance Report - {alliance_name}"
             description_text = f"**Session:** {session_name}"
             if event_type:
-                description_text += f" [{event_type}]"
+                description_text += f" [{event_type_display(event_type)[0]}]"
             description_text += f"\n**Total Marked:** {len(records)} players"
             
             embed = discord.Embed(
                 title=embed_title,
                 description=description_text,
-                color=discord.Color.green() if is_preview else discord.Color.blue()
+                color=theme.emColor3 if is_preview else discord.Color.blue()
             )
             embed.set_image(url="attachment://attendance_report.png")
 
@@ -663,7 +894,7 @@ class AttendanceReport(commands.Cog):
                 # Preview mode - create a simple back button that clears attachments
                 view = discord.ui.View(timeout=7200)
                 back_button = discord.ui.Button(
-                    label="⬅️ Back",
+                    label="Back", emoji=f"{theme.backIcon}",
                     style=discord.ButtonStyle.secondary
                 )
                 
@@ -683,7 +914,7 @@ class AttendanceReport(commands.Cog):
                 
                 # Back button
                 back_button = discord.ui.Button(
-                    label="⬅️ Back",
+                    label="Back", emoji=f"{theme.backIcon}",
                     style=discord.ButtonStyle.secondary
                 )
                 
@@ -696,7 +927,7 @@ class AttendanceReport(commands.Cog):
                 # Export button - only for full reports
                 export_button = discord.ui.Button(
                     label="Export",
-                    emoji="📥",
+                    emoji=f"{theme.exportIcon}",
                     style=discord.ButtonStyle.primary
                 )
                 
@@ -721,6 +952,31 @@ class AttendanceReport(commands.Cog):
                 export_button.callback = export_callback
                 view.add_item(export_button)
 
+                # Post to Channel button - only for full reports
+                post_button = discord.ui.Button(
+                    label="Post to Channel",
+                    emoji=f"{theme.announceIcon}",
+                    style=discord.ButtonStyle.success
+                )
+
+                async def post_callback(post_interaction: discord.Interaction):
+                    # Create a fresh file for posting
+                    img_buffer_copy = BytesIO()
+                    img_buffer.seek(0)
+                    img_buffer_copy.write(img_buffer.read())
+                    img_buffer_copy.seek(0)
+                    file_for_channel = discord.File(img_buffer_copy, filename="attendance_report.png")
+
+                    channel_view = ChannelSelectView(self, [embed], image_file=file_for_channel)
+                    await post_interaction.response.send_message(
+                        "Select a channel to post the attendance report:",
+                        view=channel_view,
+                        ephemeral=True
+                    )
+
+                post_button.callback = post_callback
+                view.add_item(post_button)
+
             # Handle both regular and deferred interactions
             if interaction.response.is_done():
                 await interaction.edit_original_response(embed=embed, view=view, attachments=[file])
@@ -728,6 +984,7 @@ class AttendanceReport(commands.Cog):
                 await interaction.response.edit_message(embed=embed, view=view, attachments=[file])
 
         except Exception as e:
+            logger.error(f"Matplotlib error: {e}")
             print(f"Matplotlib error: {e}")
             # Fallback to text report
             await self.show_text_report(interaction, alliance_id, session_name, is_preview, selected_players, session_id, marking_view)
@@ -754,10 +1011,17 @@ class AttendanceReport(commands.Cog):
                     status, last_date = result
                     # Format the date
                     try:
-                        last_date_obj = datetime.fromisoformat(last_date.replace('Z', '+00:00'))
+                        if isinstance(last_date, str):
+                            last_date_obj = datetime.fromisoformat(last_date.replace('Z', '+00:00'))
+                        else:
+                            last_date_obj = last_date
                         date_str = last_date_obj.strftime("%m/%d")
-                    except:
-                        date_str = last_date.split('T')[0] if 'T' in last_date else last_date
+                    except Exception:
+                        # Fallback for unparseable dates
+                        if isinstance(last_date, str):
+                            date_str = last_date.split('T')[0] if 'T' in last_date else last_date.split()[0] if ' ' in last_date else last_date
+                        else:
+                            date_str = str(last_date)
                     
                     status_display = status.replace('_', ' ').title()
                     return f"{status_display} ({date_str})"
@@ -780,6 +1044,7 @@ class AttendanceReport(commands.Cog):
                         # This is the first event of this type
                         return "First Event"
         except Exception as e:
+            logger.error(f"Error fetching last attendance: {e}")
             print(f"Error fetching last attendance: {e}")
             return "N/A"
 
@@ -817,7 +1082,7 @@ class AttendanceReport(commands.Cog):
                 
                 if not records:
                     await interaction.response.edit_message(
-                        content=f"❌ No attendance has been marked yet.",
+                        content=f"{theme.deniedIcon} No attendance has been marked yet.",
                         embed=None,
                         view=None
                     )
@@ -846,7 +1111,7 @@ class AttendanceReport(commands.Cog):
                             ORDER BY points DESC, marked_at DESC
                         """, (str(alliance_id), session_name))
                     db_records = cursor.fetchall()
-                    
+
                     # Get session_id if not provided (needed for last event lookup)
                     if not session_id and db_records:
                         cursor.execute("""
@@ -870,7 +1135,7 @@ class AttendanceReport(commands.Cog):
                             record[0], event_type, event_date, session_id
                         ) if event_type and event_date and session_id else "N/A"
                         
-                        # Format: (fid, nickname, status, points, last_event_attendance, marked_date, marked_by)
+                        # Format: (id, nickname, status, points, last_event_attendance, marked_date, marked_by)
                         records.append((
                             record[0],  # player_id
                             record[1],  # player_name
@@ -883,7 +1148,7 @@ class AttendanceReport(commands.Cog):
 
             if not records:
                 await interaction.edit_original_response(
-                    content=f"❌ No attendance records found for session '{session_name}' in {alliance_name}.",
+                    content=f"{theme.deniedIcon} No attendance records found for session '{session_name}' in {alliance_name}.",
                     embed=None,
                     view=None
                 )
@@ -907,46 +1172,54 @@ class AttendanceReport(commands.Cog):
                         result = cursor.fetchone()
                         if result:
                             session_id = result[0]
-                except:
+                except Exception:
                     pass
 
             # Build the report sections
             report_sections = []
             
             # Summary section
-            report_sections.append("📊 **SUMMARY**")
+            report_sections.append(f"{theme.chartIcon} **SUMMARY**")
             session_line = f"**Session:** {session_name}"
             if event_type:
-                session_line += f" [{event_type}]"
+                session_line += f" [{event_type_display(event_type)[0]}]"
             report_sections.append(session_line)
             report_sections.append(f"**Alliance:** {alliance_name}")
             date_str = "N/A"
             if records and records[0][5]:
-                date_str = records[0][5].split()[0] if isinstance(records[0][5], str) else str(records[0][5])
+                event_date_value = records[0][5]
+                if isinstance(event_date_value, str):
+                    # String format - extract date portion
+                    date_str = event_date_value.split('T')[0] if 'T' in event_date_value else event_date_value.split()[0]
+                else:
+                    # Datetime object - format it
+                    try:
+                        date_str = event_date_value.strftime("%Y-%m-%d")
+                    except Exception:
+                        date_str = str(event_date_value)
             report_sections.append(f"**Date:** {date_str}")
             report_sections.append(f"**Total Marked:** {len(records)} players")
             report_sections.append(f"**Present:** {present_count} | **Absent:** {absent_count}")
-            if session_id:
-                report_sections.append(f"**Session ID:** {session_id}")
             report_sections.append("")
             
             # Player details section
-            report_sections.append("👥 **PLAYER DETAILS**")
-            report_sections.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            
-            # Sort: Present (by points desc) → Absent
-            def sort_key(record):
-                attendance_type = record[2]
-                points = record[3] or 0
-                
-                type_priority = {
-                    "present": 1,
-                    "absent": 2
-                }.get(attendance_type, 3)
-                
-                return (type_priority, -points)
-            
+            report_sections.append(f"{theme.membersIcon} **PLAYER DETAILS**")
+            report_sections.append(theme.middleDivider)
+
+            # Get user's sort preference and apply sorting
+            sort_preference = await self.get_user_sort_preference(interaction.user.id)
+            sort_key = self._get_sort_function(sort_preference)
             sorted_records = sorted(records, key=sort_key)
+
+
+            # Format sort description for footer
+            sort_descriptions = {
+                "points_desc": "Sorted by Points (Highest to Lowest)",
+                "name_asc": "Sorted by Name (A-Z)",
+                "name_asc_all": "Sorted by Name (A-Z, All Users)",
+                "last_attended_first": "Sorted by Last Attended (Most Recent First)"
+            }
+            sort_footer = sort_descriptions.get(sort_preference, "Sorted by Points (Highest to Lowest)")
             
             for record in sorted_records:
                 fid = record[0]
@@ -954,44 +1227,93 @@ class AttendanceReport(commands.Cog):
                 attendance_status = record[2]
                 points = record[3] or 0
                 last_event_attendance = record[4] or "N/A"
-                
+
+                # Fix Arabic text for proper display
+                display_nickname = self._fix_arabic_text(nickname)
+
                 # Get status emoji
                 status_emoji = self._get_status_emoji(attendance_status)
-                
+
                 # Convert last attendance status to relevant emoji
                 last_event_display = self._format_last_attendance(last_event_attendance)
-                
+
                 points_display = f"{points:,}" if points > 0 else "0"
-                
-                player_line = f"{status_emoji} **{nickname}** (ID: {fid})"
+
+                player_line = f"{status_emoji} **{display_nickname}** (ID: {fid})"
                 if points > 0:
                     player_line += f" | **{points_display}** points"
                 if last_event_attendance != "N/A":
                     player_line += f" | Last: {last_event_display}"
-                
+
                 report_sections.append(player_line)
 
-            # Join all sections and create final embed
-            report_description = "\n".join(report_sections)
-            
-            embed = discord.Embed(
-                title=f"📊 Attendance Report - {alliance_name}",
-                description=report_description,
-                color=discord.Color.blue()
-            )
-            
-            if session_id:
-                embed.set_footer(text=f"Session ID: {session_id} | Sorted by Points (Highest to Lowest)")
-            else:
-                embed.set_footer(text="Sorted by Points (Highest to Lowest)")
-            
+            # Discord embed description limit is 4096 characters, but Discord truncates the display earlier
+            MAX_EMBED_LENGTH = 3000
+
+            # Split report into multiple embeds if needed
+            embeds = []
+            current_sections = []
+            current_length = 0
+
+            # Keep track of where we split (after summary or in player list)
+            summary_end_index = report_sections.index("") if "" in report_sections else 0
+
+            for i, section in enumerate(report_sections):
+                section_with_newline = section + "\n"
+                section_length = len(section_with_newline)
+
+                # Check if adding this section exceeds limit
+                if current_length + section_length > MAX_EMBED_LENGTH and current_sections:
+                    # Create embed with current sections
+                    embed_description = "\n".join(current_sections)
+                    embeds.append(embed_description)
+                    current_sections = []
+                    current_length = 0
+
+                    # If we're past the summary, add a continuation header
+                    if i > summary_end_index:
+                        continuation_header = f"{theme.membersIcon} **PLAYER DETAILS** (continued)"
+                        current_sections.append(continuation_header)
+                        current_length = len(continuation_header) + 1
+
+                current_sections.append(section)
+                current_length += section_length
+
+            # Add remaining sections
+            if current_sections:
+                embeds.append("\n".join(current_sections))
+
+            # Create Discord embeds
+            discord_embeds = []
+            for idx, embed_desc in enumerate(embeds):
+                if idx == 0:
+                    # First embed gets the full title
+                    embed = discord.Embed(
+                        title=f"{theme.chartIcon} Attendance Report - {alliance_name}",
+                        description=embed_desc,
+                        color=theme.emColor1
+                    )
+                else:
+                    # Subsequent embeds get continuation title
+                    embed = discord.Embed(
+                        title=f"{theme.chartIcon} Attendance Report - {alliance_name} (Page {idx + 1})",
+                        description=embed_desc,
+                        color=theme.emColor1
+                    )
+
+                # Add footer only to last embed
+                if idx == len(embeds) - 1:
+                    embed.set_footer(text=sort_footer)
+
+                discord_embeds.append(embed)
+
             # Create view with back and export buttons
             view = discord.ui.View(timeout=7200)
 
             # Back button - different behavior for preview vs regular mode
             if is_preview and marking_view:
                 back_button = discord.ui.Button(
-                    label="⬅️ Back to Marking",
+                    label="Back to Marking", emoji=f"{theme.backIcon}",
                     style=discord.ButtonStyle.secondary
                 )
 
@@ -1002,7 +1324,7 @@ class AttendanceReport(commands.Cog):
                 view.add_item(back_button)
             else:
                 back_button = discord.ui.Button(
-                    label="⬅️ Back to Sessions",
+                    label="Back to Sessions", emoji=f"{theme.backIcon}",
                     style=discord.ButtonStyle.secondary
                 )
 
@@ -1011,45 +1333,71 @@ class AttendanceReport(commands.Cog):
 
                 back_button.callback = back_callback
                 view.add_item(back_button)
-            
+
             # Export button
             export_button = discord.ui.Button(
                 label="Export",
-                emoji="📥",
+                emoji=f"{theme.exportIcon}",
                 style=discord.ButtonStyle.primary
             )
-            
+
             async def export_callback(export_interaction: discord.Interaction):
                 session_info = {
                     'session_name': session_name,
                     'alliance_name': alliance_name,
                     'event_type': event_type or 'Other',
                     'event_date': event_date,
-                    'total_players': len(records),
+                    'total_players': len(sorted_records),
                     'present_count': present_count,
                     'absent_count': absent_count,
                     'not_recorded_count': not_recorded_count
                 }
-                export_view = ExportFormatSelectView(self, records, session_info)
+                export_view = ExportFormatSelectView(self, sorted_records, session_info)
                 await export_interaction.response.send_message(
                     "Select export format:",
                     view=export_view,
                     ephemeral=True
                 )
-            
+
             export_button.callback = export_callback
             view.add_item(export_button)
-            
+
+            # Post to Channel button - only for non-preview mode
+            if not is_preview:
+                post_button = discord.ui.Button(
+                    label="Post to Channel",
+                    emoji=f"{theme.announceIcon}",
+                    style=discord.ButtonStyle.success
+                )
+
+                async def post_callback(post_interaction: discord.Interaction):
+                    channel_view = ChannelSelectView(self, discord_embeds, image_file=None)
+                    await post_interaction.response.send_message(
+                        "Select a channel to post the attendance report:",
+                        view=channel_view,
+                        ephemeral=True
+                    )
+
+                post_button.callback = post_callback
+                view.add_item(post_button)
+
             # Handle both regular and deferred interactions
+            # Send first embed with view, then send additional embeds
             if interaction.response.is_done():
-                await interaction.edit_original_response(embed=embed, view=view)
+                await interaction.edit_original_response(embed=discord_embeds[0], view=view)
             else:
-                await interaction.response.edit_message(embed=embed, view=view)
+                await interaction.response.edit_message(embed=discord_embeds[0], view=view)
+
+            # Send additional embeds as follow-up messages (without view)
+            if len(discord_embeds) > 1:
+                for embed in discord_embeds[1:]:
+                    await interaction.followup.send(embed=embed, ephemeral=False)
 
         except Exception as e:
+            logger.error(f"Error showing text attendance report: {e}")
             print(f"Error showing text attendance report: {e}")
             # Try to respond appropriately based on interaction state
-            error_content = "❌ An error occurred while generating attendance report."
+            error_content = f"{theme.deniedIcon} An error occurred while generating attendance report."
             if interaction.response.is_done():
                 await interaction.edit_original_response(content=error_content, embed=None, view=None)
             else:
@@ -1086,11 +1434,24 @@ class AttendanceReport(commands.Cog):
                 """, (str(alliance_id),))
                 
                 for row in cursor.fetchall():
+                    # Handle date - could be string or datetime object
+                    date_value = row[3]
+                    if date_value:
+                        if isinstance(date_value, str):
+                            date_display = date_value.split('T')[0] if 'T' in date_value else date_value.split()[0] if ' ' in date_value else date_value
+                        else:
+                            try:
+                                date_display = date_value.strftime("%Y-%m-%d")
+                            except Exception:
+                                date_display = str(date_value)
+                    else:
+                        date_display = "Unknown"
+
                     sessions.append({
                         'session_id': row[0],
                         'name': row[1],
                         'event_type': row[2],
-                        'date': row[3].split('T')[0] if row[3] else "Unknown",
+                        'date': date_display,
                         'player_count': row[4],
                         'marked_count': row[5]
                     })
@@ -1098,23 +1459,23 @@ class AttendanceReport(commands.Cog):
             if not sessions:
                 # Create embed for no sessions found
                 embed = discord.Embed(
-                    title=f"📋 Attendance Sessions - {alliance_name}",
-                    description=f"❌ **No attendance sessions found for {alliance_name}.**\n\nTo create attendance records, use the 'Mark Attendance' option from the main menu.",
+                    title=f"{theme.listIcon} Attendance Sessions - {alliance_name}",
+                    description=f"{theme.deniedIcon} **No attendance sessions found for {alliance_name}.**\n\nTo create attendance records, use the 'Mark Attendance' option from the main menu.",
                     color=discord.Color.orange()
                 )
                 
                 # Add back button
                 back_view = discord.ui.View(timeout=7200)
                 back_button = discord.ui.Button(
-                    label="⬅️ Back to Alliance Selection",
+                    label="Back", emoji=f"{theme.backIcon}",
                     style=discord.ButtonStyle.secondary
                 )
-                
+
                 async def back_callback(back_interaction: discord.Interaction):
                     attendance_cog = self.bot.get_cog("Attendance")
                     if attendance_cog:
-                        await attendance_cog.show_attendance_menu(back_interaction)
-                
+                        await attendance_cog.show_attendance_hub(back_interaction, alliance_id)
+
                 back_button.callback = back_callback
                 back_view.add_item(back_button)
                 
@@ -1138,9 +1499,9 @@ class AttendanceReport(commands.Cog):
             view = SessionSelectView(sessions, alliance_id, self, is_viewing=True)
             
             embed = discord.Embed(
-                title=f"📋 Attendance Sessions - {alliance_name}",
+                title=f"{theme.listIcon} Attendance Sessions - {alliance_name}",
                 description="Please select a session to view attendance records:",
-                color=discord.Color.blue()
+                color=theme.emColor1
             )
             
             if interaction.response.is_done():
@@ -1149,16 +1510,17 @@ class AttendanceReport(commands.Cog):
                 await interaction.response.edit_message(embed=embed, view=view, attachments=[])
     
         except Exception as e:
+            logger.error(f"Error showing session selection: {e}")
             print(f"Error showing session selection: {e}")
             if interaction.response.is_done():
                 await interaction.edit_original_response(
-                    content="❌ An error occurred while loading sessions.",
+                    content=f"{theme.deniedIcon} An error occurred while loading sessions.",
                     embed=None,
                     view=None
                 )
             else:
                 await interaction.response.send_message(
-                    "❌ An error occurred while loading sessions.",
+                    f"{theme.deniedIcon} An error occurred while loading sessions.",
                     ephemeral=True
                 )
 
@@ -1167,4 +1529,5 @@ async def setup(bot):
         cog = AttendanceReport(bot)
         await bot.add_cog(cog)
     except Exception as e:
-        print(f"❌ Failed to load AttendanceReport cog: {e}")
+        logger.error(f"Failed to load AttendanceReport cog: {e}")
+        print(f"[ERROR] Failed to load AttendanceReport cog: {e}")

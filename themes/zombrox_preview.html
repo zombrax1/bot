@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zombrox Theme Preview</title>
+<style>
+  :root {
+    --bg: #020710;
+    --panel: #071426;
+    --panel2: #0b1a31;
+    --line: rgba(157,220,255,.25);
+    --cyan: #00ffd5;
+    --cyan2: #00a6ff;
+    --amber: #ff9f1a;
+    --green: #20e3a2;
+    --red: #ff4d4d;
+    --text: #f4f7fb;
+    --muted: #a9c7e8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--text);
+    font-family: Inter, Segoe UI, Arial, sans-serif;
+    background:
+      linear-gradient(90deg, rgba(2,7,16,.96), rgba(2,7,16,.7), rgba(2,7,16,.96)),
+      url('../admin dashboard/src/assets/arctic-command-bg.png') center/cover fixed,
+      var(--bg);
+    letter-spacing: 0;
+  }
+  .wrap { padding: 42px; max-width: 1180px; margin: 0 auto; }
+  .hero {
+    border: 1px solid rgba(0,255,213,.35);
+    background: linear-gradient(135deg, rgba(7,20,38,.92), rgba(2,7,16,.78));
+    box-shadow: 0 0 38px rgba(0,255,213,.08), inset 0 1px 0 rgba(255,255,255,.06);
+    border-radius: 8px;
+    padding: 30px 34px;
+    margin-bottom: 22px;
+  }
+  .eyebrow { color: var(--cyan); font-weight: 900; text-transform: uppercase; font-size: 13px; letter-spacing: .08em; }
+  h1 { margin: 10px 0 8px; font-size: 46px; line-height: 1; text-transform: uppercase; }
+  .subtitle { color: #d6e8ff; font-size: 18px; max-width: 840px; }
+  .grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 22px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; background: rgba(7,20,38,.92); overflow: hidden; }
+  .card h2 { margin: 0; padding: 16px 18px; font-size: 17px; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
+  .embed { margin: 18px; padding: 18px; border-left: 4px solid var(--cyan); border-radius: 6px; background: linear-gradient(135deg, rgba(10,23,42,.96), rgba(12,16,27,.96)); box-shadow: 0 14px 30px rgba(0,0,0,.24); }
+  .embed.warn { border-color: var(--amber); }
+  .embed.good { border-color: var(--green); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(157,220,255,.12); }
+  .row:last-child { border-bottom: 0; }
+  .label { color: var(--muted); font-size: 13px; }
+  .value { font-weight: 900; }
+  .tag { border-radius: 5px; border: 1px solid rgba(0,255,213,.45); color: var(--cyan); background: rgba(0,255,213,.1); padding: 6px 10px; font-weight: 900; font-size: 12px; text-transform: uppercase; }
+  .tag.amber { border-color: rgba(255,159,26,.55); background: rgba(255,159,26,.12); color: #ffc06b; }
+  .palette { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; padding: 18px; }
+  .swatch { min-height: 96px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); padding: 12px; display: flex; flex-direction: column; justify-content: end; font-weight: 900; }
+  .icons { padding: 18px; display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+  .icon { border: 1px solid rgba(157,220,255,.18); background: rgba(255,255,255,.03); border-radius: 6px; padding: 11px 10px; display: grid; gap: 4px; }
+  .icon b { font-size: 22px; color: var(--cyan); }
+  .icon span { color: var(--muted); font-size: 11px; }
+  .divider { color: var(--cyan); font-family: Consolas, monospace; font-weight: 900; text-shadow: 0 0 12px rgba(0,255,213,.4); }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="eyebrow">? Whiteout Survival Control Theme</div>
+      <h1>Zombrox</h1>
+      <div class="subtitle">Discord bot theme designed to match the dashboard: dark arctic command panels, neon cyan controls, furnace amber warnings, and clean high-contrast status colors.</div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <h2>Discord Embed Preview</h2>
+        <div class="embed">
+          <div class="row"><div><div class="label">? Alliance</div><div class="value">DED</div></div><span class="tag">Active</span></div>
+          <div class="row"><div><div class="label">? Member</div><div class="value">Alexmania</div></div><span class="tag amber">FC 8-3</span></div>
+          <div class="row"><div><div class="label">ID</div><div class="value">244936437</div></div><span class="tag">State 1640</span></div>
+          <div class="row"><div><div class="label">?? Power</div><div class="value">661.7M</div></div><span class="tag amber">Review</span></div>
+          <p class="divider">??????????????????????????????</p>
+        </div>
+        <div class="embed good">
+          <div class="row"><div><div class="label">? Gift Claim</div><div class="value">All rows processed</div></div><span class="tag">Done</span></div>
+        </div>
+        <div class="embed warn">
+          <div class="row"><div><div class="label">?? Manual Check</div><div class="value">No Discord FID, DED review</div></div><span class="tag amber">Check</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Palette</h2>
+        <div class="palette">
+          <div class="swatch" style="background:#071426">Header<br>#071426</div>
+          <div class="swatch" style="background:#00ffd5;color:#031116">Action<br>#00FFD5</div>
+          <div class="swatch" style="background:#ff9f1a;color:#1a0b00">Furnace<br>#FF9F1A</div>
+          <div class="swatch" style="background:#20e3a2;color:#031116">Success<br>#20E3A2</div>
+          <div class="swatch" style="background:#ff4d4d;color:#210000">Danger<br>#FF4D4D</div>
+          <div class="swatch" style="background:#0b1a31">Panel<br>#0B1A31</div>
+        </div>
+        <h2>Icon Direction</h2>
+        <div class="icons">
+          <div class="icon"><b>?</b><span>Alliance</span></div>
+          <div class="icon"><b>??</b><span>Furnace</span></div>
+          <div class="icon"><b>?</b><span>Search</span></div>
+          <div class="icon"><b>?</b><span>Refresh</span></div>
+          <div class="icon"><b>???</b><span>Control</span></div>
+          <div class="icon"><b>?</b><span>Power</span></div>
+          <div class="icon"><b>?</b><span>Success</span></div>
+          <div class="icon"><b>??</b><span>Review</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

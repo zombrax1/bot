@@ -5,6 +5,8 @@ log
 bot_token.txt
 version
 .python-version
-bot_venv
+*venv*
 backups
 captcha_images
+.vscode
+CLAUDE.md

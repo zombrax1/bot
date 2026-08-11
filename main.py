@@ -3,9 +3,91 @@ import sys
 import os
 import shutil
 import stat
+import contextlib
 
-def is_container() -> bool:
-    return os.path.exists("/.dockerenv") or os.path.exists("/var/run/secrets/kubernetes.io")
+# Cap glibc malloc arenas before anything allocates: glibc keeps a per-thread
+# arena and never frees it, so OCR across many to_thread workers grows RSS until
+# a 512MB container OOM-kills the bot. Must be set before glibc inits, so re-exec
+# once if unset (same PID). Pre-set it to override.
+if sys.platform.startswith("linux") and "MALLOC_ARENA_MAX" not in os.environ:
+    os.environ["MALLOC_ARENA_MAX"] = "2"
+    os.environ.setdefault("MALLOC_TRIM_THRESHOLD_", "131072")
+    try:
+        from cogs import bot_startup_display as _startup
+        _startup.phase_ok("Optimized memory allocation")
+    except Exception:
+        print("  Optimized memory allocation", flush=True)
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+def _bootstrap_from_main_branch(zip_url):
+    """Self-heal: download source zip, extract atomically via staging dir, guard against path traversal."""
+    import urllib.request, zipfile, io
+    print("Bot files missing — downloading latest source...")
+    try:
+        with urllib.request.urlopen(zip_url, timeout=600) as r:
+            buf = io.BytesIO(r.read())
+    except Exception as e:
+        print(f"Download failed: {e}")
+        print(f"Please download the source manually from:\n  {zip_url}")
+        print("Extract everything into this folder and run main.py again.")
+        sys.exit(1)
+
+    staging = "bot-bootstrap-tmp"
+    if os.path.exists(staging):
+        shutil.rmtree(staging, ignore_errors=True)
+    os.makedirs(staging)
+    staging_root = os.path.realpath(staging)
+
+    try:
+        with zipfile.ZipFile(buf) as zf:
+            for m in zf.namelist():
+                parts = m.split("/", 1)
+                if len(parts) < 2 or not parts[1]:
+                    continue
+                target = os.path.realpath(os.path.join(staging, parts[1]))
+                if target != staging_root and not target.startswith(staging_root + os.sep):
+                    raise RuntimeError(f"zip entry escapes staging dir: {m}")
+                if m.endswith("/"):
+                    os.makedirs(target, exist_ok=True)
+                else:
+                    os.makedirs(os.path.dirname(target) or staging, exist_ok=True)
+                    with zf.open(m) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+        # Extraction succeeded — flip staged tree into cwd
+        for item in os.listdir(staging):
+            src = os.path.join(staging, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, item, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, item)
+    except Exception as e:
+        print(f"Extraction failed: {e}")
+        print("Your existing files were not modified. Re-run main.py to retry.")
+        sys.exit(1)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+try:
+    from cogs import bot_startup_display as startup
+    from cogs.bot_restart import is_container, restart_process
+except ImportError:
+    # cogs/ is missing (likely a bare main.py drop). Fetch the full source for this branch and restart.
+    _bootstrap_from_main_branch(os.environ.get(
+        "BOT_BOOTSTRAP_URL",
+        "https://github.com/whiteout-project/bot/archive/refs/heads/main.zip",
+    ))
+    print("Download complete. Restarting...")
+    if sys.platform == "win32":
+        sys.exit(0)  # .bat / user re-runs; os.execv on Windows can race with the launcher
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+# Python version check
+MIN_PYTHON = (3, 11)
+
+if sys.version_info < MIN_PYTHON:
+    startup.python_too_old(f"{MIN_PYTHON[0]}.{MIN_PYTHON[1]}", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    sys.exit(1)
 
 def is_ci_environment() -> bool:
     """Check if running in a CI environment"""
@@ -15,14 +97,45 @@ def is_ci_environment() -> bool:
     ]
     return any(os.getenv(indicator) for indicator in ci_indicators)
 
+def break_system_packages() -> bool:
+    """Check if the user is certain about breaking system packages"""
+    return "--break-system-packages" in sys.argv
+
+def break_system_packages_arg() -> bool:
+    return break_system_packages() and not should_skip_venv()
+
+def _pip_env():
+    """Env for pip subprocesses that puts pip's download/unpack temp on the
+    working volume. Containers (e.g. Pterodactyl) often give /tmp a tiny tmpfs
+    separate from the disk quota, so big wheels (opencv ~73MB) fail with
+    'No space left on device' even when the real disk has room. --no-cache-dir
+    only moves the cache, not this temp."""
+    env = os.environ.copy()
+    tmp = os.path.join(os.getcwd(), ".pip-tmp")
+    try:
+        os.makedirs(tmp, exist_ok=True)
+        env["TMPDIR"] = tmp   # POSIX
+        env["TEMP"] = tmp     # Windows
+        env["TMP"] = tmp
+    except Exception:
+        pass  # fall back to the default temp dir
+    return env
+
 def should_skip_venv() -> bool:
     """Check if venv should be skipped"""
+    
+    if ("--no-venv" in sys.argv) and (sys.platform.startswith("linux")) and (not is_container()) and (not is_ci_environment()) and (not break_system_packages()):
+        startup.error_box(
+            "Virtual Environment Required",
+            "On Linux, running without a virtual environment won't work unless you break system packages.",
+            "Add --break-system-packages to confirm you understand the risks."
+        )
+        sys.exit(1)
+    
     return '--no-venv' in sys.argv or is_container() or is_ci_environment()
 
 # Handle venv setup
 if sys.prefix == sys.base_prefix and not should_skip_venv():
-    print("Running the bot in a venv (virtual environment) to avoid dependency conflicts.")
-    print("Note: You can skip venv creation with the --no-venv argument if needed.")
     venv_path = "bot_venv"
 
     # Determine the python executable path in the venv
@@ -35,59 +148,55 @@ if sys.prefix == sys.base_prefix and not should_skip_venv():
 
     if not os.path.exists(venv_path):
         try:
-            print("Attempting to create virtual environment automatically...")
+            startup.phase_start("Setting up virtual environment")
             subprocess.check_call([sys.executable, "-m", "venv", venv_path], timeout=300)
-            print(f"Virtual environment created at {venv_path}")
+
+            # 3.12+ venvs seed only pip; source builds need setuptools.
+            try:
+                subprocess.run([venv_python_name, "-m", "pip", "install", "--upgrade",
+                                "setuptools", "wheel"], timeout=300,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
 
             if sys.platform == "win32":
-                print("\nVirtual environment created.")
-                print("To continue, please run the script again with the venv Python:")
-                print(f"  1. Ensure CMD or PowerShell is open in this directory: {os.getcwd()}")
-                print(f"  2. Run this exact command: {venv_python_name} {os.path.basename(sys.argv[0])}")
+                startup.venv_instructions(venv_python_name, sys.platform)
                 sys.exit(0)
             else: # For non-Windows, try to relaunch automatically
-                print("Restarting script in virtual environment...")
+                startup.venv_instructions(venv_python_name, sys.platform)
                 venv_python_executable = os.path.join(venv_path, "bin", "python")
                 os.execv(venv_python_executable, [venv_python_executable] + sys.argv)
 
         except Exception as e:
-            print("Failed to create virtual environment automatically.")
-            print(f"Error: {e}")
-            print("Please create one manually with: python -m venv bot_venv")
-            print("Then activate it and run this script again.")
-            print("See also: https://docs.python.org/3/library/venv.html#how-venvs-work")
+            startup.error_box("Virtual Environment Failed", str(e), "python -m venv bot_venv")
             sys.exit(1)
     else: # Venv exists
         if sys.platform == "win32":
-            print(f"Virtual environment at {venv_path} exists.")
-            print("To ensure you are using it, please run the script with the venv Python:")
-            print(f"  1. Ensure CMD or PowerShell is open in this directory: {os.getcwd()}")
-            print(f"  2. Run this exact command: {venv_python_name} {os.path.basename(sys.argv[0])}")
+            startup.venv_exists_instructions(venv_python_name, sys.platform)
             sys.exit(0)
         elif '--no-venv' in sys.argv:
-            print("Virtual environment setup skipped due to --no-venv flag.")
-            print("Warning: Dependencies will be installed system-wide which may cause conflicts.")
+            pass  # Silent, not important
         else: # For non-Windows, if venv exists but we're not in it, try to relaunch
             venv_python_executable = os.path.join(venv_path, "bin", "python")
             if os.path.exists(venv_python_executable):
-                print(f"Using existing virtual environment at {venv_path}. Restarting...")
                 os.execv(venv_python_executable, [venv_python_executable] + sys.argv)
             else:
-                print(f"Virtual environment at {venv_path} appears corrupted.")
-                print("Please remove it and run the script again, or create a new one manually.")
+                startup.error_box("Virtual Environment Corrupted", "Please delete bot_venv and run again.")
                 sys.exit(1)
 
 try: # Import or install requests so we can get the requirements
     import requests
 except ImportError:
-    print("Installing requests (required for dependency management)...")
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"], 
-                            timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmd = [sys.executable, "-m", "pip", "install", "requests"]
+
+        if break_system_packages_arg():
+            cmd.append("--break-system-packages")
+
+        subprocess.check_call(cmd, timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         import requests
     except Exception as e:
-        print(f"Failed to install requests: {e}")
-        print("Please install requests manually: pip install requests")
+        startup.error_box("Dependency Error", f"Failed to install requests: {e}", "pip install requests")
         sys.exit(1)
 
 def remove_readonly(func, path, _):
@@ -116,7 +225,10 @@ def safe_remove(path, is_dir=None):
     try:
         if is_dir:
             if sys.platform == "win32":
-                shutil.rmtree(path, onexc=remove_readonly)
+                if sys.version_info >= (3, 12): # check if python version >= 3.12 for onexc support
+                    shutil.rmtree(path, onexc=remove_readonly)
+                else:
+                    shutil.rmtree(path, onerror=remove_readonly)
             else:
                 shutil.rmtree(path)
         else:
@@ -138,6 +250,12 @@ def safe_remove(path, is_dir=None):
     
     return False
 
+def _requirement_name(spec):
+    """Extract the bare package name from a requirements.txt line/spec."""
+    for sep in ("==", ">=", "<=", "~=", "!="):
+        spec = spec.split(sep)[0]
+    return spec
+
 def calculate_file_hash(filepath):
     """Calculate SHA256 hash of a file."""
     import hashlib
@@ -153,122 +271,46 @@ def calculate_file_hash(filepath):
     except Exception:
         return None
 
-def uninstall_packages(packages, reason=""):
-    """Generic function to uninstall a list of packages"""
-    if not packages:
-        return
-    
-    print(F.YELLOW + f"Found {len(packages)} packages to remove{reason}: {', '.join(packages)}" + R)
-    debug_mode = "--verbose" in sys.argv or "--debug" in sys.argv
-    
-    for package in packages:
-        try:
-            cmd = [sys.executable, "-m", "pip", "uninstall", "-y", package]
-            
-            if debug_mode:
-                subprocess.check_call(cmd, timeout=300)
-            else:
-                subprocess.check_call(cmd, timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(F.GREEN + f"✓ Removed {package}" + R)
-        except subprocess.CalledProcessError:
-            print(F.YELLOW + f"✗ Could not remove {package} (might be needed by other packages)" + R)
-        except Exception as e:
-            print(F.YELLOW + f"✗ Error removing {package}: {e}" + R)
-
-def get_packages_to_remove():
-    """Get all packages that should be removed (from requirements comparison + legacy)"""
-    packages_to_remove = set()
-    
-    # Check requirements.old vs requirements.txt (if they exist)
-    if os.path.exists("requirements.old") and os.path.exists("requirements.txt"):
-        try:
-            old_packages = set()
-            new_packages = set()
-            
-            # Parse old requirements
-            with open("requirements.old", "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        pkg_name = line.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].split("!=")[0]
-                        old_packages.add(pkg_name.strip().lower())
-            
-            # Parse new requirements
-            with open("requirements.txt", "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        pkg_name = line.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].split("!=")[0]
-                        new_packages.add(pkg_name.strip().lower())
-            
-            packages_to_remove.update(old_packages - new_packages)
-        except Exception as e:
-            print(F.YELLOW + f"Error comparing requirements: {e}" + R)
-    
-    # Always check for legacy packages that are still installed
-    for package in LEGACY_PACKAGES_TO_REMOVE:
-        if is_package_installed(package):
-            packages_to_remove.add(package.lower())
-    
-    return list(packages_to_remove)
-
 def cleanup_removed_packages():
-    """Main cleanup function - removes obsolete packages"""
-    packages = get_packages_to_remove()
-    
-    if packages:
-        reason = " from requirements" if os.path.exists("requirements.old") else " (legacy packages)"
-        uninstall_packages(packages, reason)
-    
-    # Clean up requirements.old
-    if os.path.exists("requirements.old"):
-        safe_remove("requirements.old", is_dir=False)
+    """Uninstall packages that were in requirements.old but not in the new
+    requirements.txt, then drop requirements.old. Called by the update flow
+    after a successful pip install of the new requirements."""
+    if not (os.path.exists("requirements.old") and os.path.exists("requirements.txt")):
+        if os.path.exists("requirements.old"):
+            safe_remove("requirements.old", is_dir=False)
+        return
 
-# Potential leftovers from older bot versions
-LEGACY_PACKAGES_TO_REMOVE = [
-    "ddddocr",
-    "easyocr", 
-    "torch",
-    "torchvision",
-    "torchaudio",
-    "opencv-python",
-    "opencv-python-headless",
-]
+    def _read_pkgs(path):
+        result = set()
+        try:
+            with open(path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        result.add(_requirement_name(line).strip().lower())
+        except Exception:
+            pass
+        return result
 
-def has_obsolete_requirements():
-    """
-    Check if requirements.txt contains obsolete packages from older versions.
-    Required to fix bug with v1.2.0 upgrade logic that deleted new requirements.txt.
-    """
-    if not os.path.exists("requirements.txt"):
-        return False
-    
-    try:
-        with open("requirements.txt", "r") as f:
-            content = f.read().lower()
-            
-        for package in LEGACY_PACKAGES_TO_REMOVE:
-            if package.lower() in content:
-                return True
-        
-        return False
-    except Exception as e:
-        print(f"Error checking requirements.txt: {e}")
-        return False
+    # Never uninstall the build toolchain - removing setuptools wedged updates once.
+    PROTECTED = {"setuptools", "pip", "wheel"}
+    removed = _read_pkgs("requirements.old") - _read_pkgs("requirements.txt") - PROTECTED
+    if removed:
+        debug = "--verbose" in sys.argv or "--debug" in sys.argv
+        print(f"Found {len(removed)} packages to remove from requirements: {', '.join(removed)}")
+        for package in removed:
+            cmd = [sys.executable, "-m", "pip", "uninstall", "-y", package]
+            if break_system_packages_arg():
+                cmd.append("--break-system-packages")
+            try:
+                if debug:
+                    subprocess.check_call(cmd, timeout=300)
+                else:
+                    subprocess.check_call(cmd, timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
 
-def is_package_installed(package_name):
-    """Check if a package is installed"""
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", package_name],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
+    safe_remove("requirements.old", is_dir=False)
 
 # Configuration for multiple update sources
 UPDATE_SOURCES = [
@@ -286,11 +328,32 @@ UPDATE_SOURCES = [
     # Can add more sources here as needed
 ]
 
+def _parse_version(tag):
+    """(major, minor, patch) for a vX.Y.Z tag, else None."""
+    if not tag:
+        return None
+    try:
+        parts = [int(n) for n in tag.strip().lstrip("vV").split(".")[:3]]
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+def _is_newer_version(candidate, current):
+    """True if candidate is a strictly newer vX.Y.Z than current; unparseable -> True so odd tags aren't blocked."""
+    c, cur = _parse_version(candidate), _parse_version(current)
+    if c is None or cur is None:
+        return True
+    return c > cur
+
 def get_latest_release_info(beta_mode=False):
     """Try to get latest release info from multiple sources."""
     for source in UPDATE_SOURCES:
         try:
-            print(f"Checking for updates from {source['name']}...")
+            startup.phase_start(f"Checking for updates ({source['name']})")
             
             if source['name'] == "GitHub":
                 if beta_mode:
@@ -339,22 +402,12 @@ def get_latest_release_info(beta_mode=False):
             
             # Add handling for other sources here
             
-        except requests.exceptions.RequestException as e:
-            if hasattr(e, 'response') and e.response is not None:
-                if e.response.status_code == 404:
-                    print(f"{source['name']} repository not found or unavailable")
-                elif e.response.status_code in [403, 429]:
-                    print(f"{source['name']} access limited (rate limit or access denied)")
-                else:
-                    print(f"{source['name']} returned HTTP {e.response.status_code}")
-            else:
-                print(f"{source['name']} connection failed")
+        except requests.exceptions.RequestException:
             continue
-        except Exception as e:
-            print(f"Failed to check {source['name']}: {e}")
+        except Exception:
             continue
-        
-    print("All update sources failed")
+
+    startup.phase_fail("Update check failed (all sources unreachable)")
     return None
 
 def download_requirements_from_release(beta_mode=False):
@@ -364,12 +417,9 @@ def download_requirements_from_release(beta_mode=False):
     if os.path.exists("requirements.txt"):
         return True
     
-    print("Downloading requirements.txt from latest release...")
-    
     # Get latest release info to find the tag
     release_info = get_latest_release_info(beta_mode=beta_mode)
     if not release_info:
-        print("Could not get release information")
         return False
     
     tag = release_info["tag_name"]
@@ -378,53 +428,45 @@ def download_requirements_from_release(beta_mode=False):
     # Build raw URL based on source and mode
     if source_name == "GitHub" or "GitHub" in source_name:
         if beta_mode:
-            raw_url = f"https://raw.githubusercontent.com/whiteout-project/bot/main/requirements.txt"
+            raw_url = "https://raw.githubusercontent.com/whiteout-project/bot/main/requirements.txt"
         else:
             raw_url = f"https://raw.githubusercontent.com/whiteout-project/bot/refs/tags/{tag}/requirements.txt"
     elif source_name == "GitLab":
         if beta_mode:
-            raw_url = f"https://gitlab.whiteout-bot.com/whiteout-project/bot/-/raw/main/requirements.txt"
+            raw_url = "https://gitlab.whiteout-bot.com/whiteout-project/bot/-/raw/main/requirements.txt"
         else:
             raw_url = f"https://gitlab.whiteout-bot.com/whiteout-project/bot/-/raw/{tag}/requirements.txt"
     else:
-        print(f"Unknown source: {source_name}")
         return False
-    
+
     try:
-        print(f"Downloading from {source_name}: {raw_url}")
         response = requests.get(raw_url, timeout=30)
-        
+
         if response.status_code == 200:
             with open("requirements.txt", "w") as f:
                 f.write(response.text)
-            print("Successfully downloaded requirements.txt")
             return True
         else:
-            print(f"Failed to download: HTTP {response.status_code}")
             return False
-            
-    except Exception as e:
-        print(f"Error downloading requirements.txt: {e}")
+
+    except Exception:
         return False
 
 def check_and_install_requirements():
     """Check each requirement and install missing ones."""
     if not os.path.exists("requirements.txt"):
-        print("No requirements.txt found")
         return False
-        
+
     # Read requirements
     with open("requirements.txt", "r") as f:
         requirements = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-    
-    print(f"Checking {len(requirements)} requirements...")
     
     missing_packages = []
     
     # Test each requirement
     for requirement in requirements:
-        package_name = requirement.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].split("!=")[0]
-        
+        package_name = _requirement_name(requirement)
+
         try:
             if package_name == "discord.py":
                 import discord
@@ -440,71 +482,98 @@ def check_and_install_requirements():
                 import PIL
             elif package_name.lower() == "numpy":
                 import numpy
-            elif package_name.lower() == "onnxruntime":
-                import onnxruntime
             else:
                 __import__(package_name)
-                        
+
         except ImportError:
-            print(f"✗ {package_name} - MISSING")
             missing_packages.append(requirement)
-    
+
     if missing_packages: # Install missing packages
-        print(f"Installing {len(missing_packages)} missing packages...")
-        
+        startup.phase_start("Installing missing packages")
+
         for package in missing_packages:
+            package_name = _requirement_name(package)
+
             try:
                 cmd = [sys.executable, "-m", "pip", "install", package, "--no-cache-dir"]
-                
-                subprocess.check_call(cmd, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                print(f"✓ {package} installed successfully")
-                
+
+                if break_system_packages_arg():
+                    cmd.append("--break-system-packages")
+
+                # Capture output so a failure shows pip's real reason (no wheel for
+                # this Python/arch, OOM kill, disk full) instead of a bare exit code.
+                result = subprocess.run(cmd, timeout=1200, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True, env=_pip_env())
+                if result.returncode != 0:
+                    tail = (result.stdout or "").strip().splitlines()[-15:]
+                    startup.phase_fail("Dependencies failed",
+                                       details=[f"Failed to install {package} (pip exit {result.returncode}):", *tail],
+                                       fix="pip install -r requirements.txt")
+                    return False
+
             except Exception as e:
-                print(f"✗ Failed to install {package}: {e}")
+                startup.phase_fail("Dependencies failed", details=[f"Failed to install {package}: {e}"], fix="pip install -r requirements.txt")
                 return False
-    
-    print("✓ All requirements satisfied")
+
+    startup.phase_ok("Dependencies satisfied")
     return True
+
+def ensure_opencv_headless():
+    """RapidOCR pulls in the full `opencv-python`, whose cv2 needs system GUI
+    libs (libGL.so.1) that headless servers lack — which silently disables OCR.
+    Swap to `opencv-python-headless`, which the bot's image processing uses fine
+    and needs no system libs. No-op once only the headless build is present."""
+    try:
+        from importlib.metadata import distributions
+        installed = {(d.metadata.get("Name") or "").lower().replace("_", "-")
+                     for d in distributions()}
+    except Exception:
+        return
+    if not ({"opencv-python", "opencv-contrib-python"} & installed):
+        return  # already headless-only (or no opencv) — nothing to do
+    startup.phase_start("Switching OpenCV to headless")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "uninstall", "-y",
+             "opencv-python", "opencv-contrib-python", "opencv-python-headless"],
+            timeout=600, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        cmd = [sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless"]
+        if break_system_packages_arg():
+            cmd.append("--break-system-packages")
+        subprocess.check_call(cmd, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=_pip_env())
+        startup.phase_ok("OpenCV set to headless")
+    except Exception as e:
+        startup.phase_fail(
+            "OpenCV headless switch failed", details=[str(e)],
+            fix="pip uninstall -y opencv-python opencv-contrib-python && pip install opencv-python-headless",
+        )
+
 
 def setup_dependencies(beta_mode=False):
     """Main function to set up all dependencies."""
-    print("\nChecking dependencies...")
-    
-    removed_obsolete = False
-    if has_obsolete_requirements():
-        print("! Warning: requirements.txt contains obsolete packages from older version")
-        print("! Removing outdated requirements.txt and downloading fresh copy...")
-        removed_obsolete = True
-
-        if not safe_remove("requirements.txt", is_dir=False):
-            print("! Error removing obsolete requirements.txt")
+    startup.phase_start("Checking dependencies")
 
     if not os.path.exists("requirements.txt"):
-        if not removed_obsolete:
-            print("! Warning: requirements.txt not found")
         if not download_requirements_from_release(beta_mode=beta_mode):
-            print("✗ Failed to download requirements.txt")
-            print("• Please download the complete bot package from: https://github.com/whiteout-project/bot/releases")
+            startup.phase_fail("Dependencies failed", details=["Could not download requirements.txt"], fix="Download the complete bot package from: https://github.com/whiteout-project/bot/releases")
             return False
-    
+
     if not check_and_install_requirements():
-        print("✗ Failed to install requirements")
+        startup.phase_fail("Dependencies failed", fix="pip install -r requirements.txt")
         return False
-    
+
+    ensure_opencv_headless()
     return True
 
 beta_mode = "--beta" in sys.argv
-if not setup_dependencies(beta_mode=beta_mode):
-    print("Warning: Dependency setup incomplete. Please update if prompted or run --repair to try fixing this.")
-    print("If update or repair fails, please install manually with: pip install -r requirements.txt")
+setup_dependencies(beta_mode=beta_mode)  # Warnings shown internally on failure
 
 try:
     from colorama import Fore, Style, init
     import discord
-    print("✓ All core imports successful")
 except ImportError as e:
-    print(f"Import failed even after dependency setup: {e}")
-    print("Please restart the script or install dependencies manually")
+    startup.error_box("Import Failed", f"Import failed after dependency setup: {e}", "Restart the script or run: pip install -r requirements.txt")
     sys.exit(1)
 
 # Colorama shortcuts
@@ -512,35 +581,40 @@ F = Fore
 R = Style.RESET_ALL
 
 import warnings
+import aiohttp
 
-def startup_cleanup():
-    """Perform all cleanup tasks on startup - directories, files, and legacy packages."""
-    v1_path = "V1oldbot"
-    if os.path.exists(v1_path) and safe_remove(v1_path):
-        print(f"Removed directory: {v1_path}")
-    
-    v2_path = "V2Old"
-    if os.path.exists(v2_path) and safe_remove(v2_path):
-        print(f"Removed directory: {v2_path}")
-    
-    pictures_path = "pictures"
-    if os.path.exists(pictures_path) and safe_remove(pictures_path):
-        print(f"Removed directory: {pictures_path}")
-    
-    txt_path = "autoupdateinfo.txt"
-    if os.path.exists(txt_path) and safe_remove(txt_path):
-        print(f"Removed file: {txt_path}")
-    
-    # Check for legacy packages to remove on startup
-    legacy_packages = []
-    for package in LEGACY_PACKAGES_TO_REMOVE:
-        if is_package_installed(package):
-            legacy_packages.append(package.lower())
-    
-    if legacy_packages:
-        uninstall_packages(legacy_packages, " (legacy packages)")
+def check_vcredist():
+    """Check if Visual C++ Redistributable is installed on Windows."""
+    if sys.platform != "win32":
+        return True  # Not applicable on non-Windows
 
-startup_cleanup()
+    try:
+        import winreg
+        import struct
+
+        # Determine Python architecture
+        is_64bit = struct.calcsize("P") * 8 == 64
+        arch = "x64" if is_64bit else "x86"
+
+        # Registry key for VC++ 2015-2022 runtime
+        key_path = f"SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\{arch}"
+
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+            winreg.CloseKey(key)
+            return True  # VC++ Redist is installed
+        except FileNotFoundError:
+            # VC++ Redist not found - show warning
+            download_url = f"https://aka.ms/vc14/vc_redist.{arch}.exe"
+            startup.phase_fail(f"Visual C++ Redistributable ({arch}) not found",
+                details=["Gift code redemption (captcha solver) will not work until this is installed."],
+                fix=f"Download from: {download_url}")
+            return False
+
+    except Exception:
+        return True  # If we can't check, we hope it's fine
+
+check_vcredist()
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -558,73 +632,117 @@ try:
     if original_create_default_https_context is None or \
        original_create_default_https_context is ssl.create_default_context:
         ssl._create_default_https_context = _create_ssl_context_with_certifi
-        
-        print(F.GREEN + "Applied SSL context patch using certifi for default HTTPS connections." + R)
-    else: # Assume if it's already patched, it's for a good reason, just log it.
-        print(F.YELLOW + "SSL default HTTPS context seems to be already modified. Skipping certifi patch." + R)
+    # else: already patched elsewhere, leave it alone
 except ImportError:
-    print(F.RED + "Certifi library not found. SSL certificate verification might fail until it's installed." + R)
-except Exception as e:
-    print(F.RED + f"Error applying SSL context patch: {e}" + R)
+    pass  # Certifi not found, SSL verification might fail
+except Exception:
+    pass  # SSL patch error, continue anyway
 
 if __name__ == "__main__":
-    import requests
+    if sys.platform == "win32":
+        import hashlib
+        import msvcrt
+        import tempfile
+
+        _lock_name = hashlib.sha256(os.path.abspath(__file__).encode()).hexdigest()[:12]
+        _instance_lock = open(
+            os.path.join(tempfile.gettempdir(), f"dedbot-{_lock_name}.lock"), "a+b"
+        )
+        if os.path.getsize(_instance_lock.name) == 0:
+            _instance_lock.write(b"\0")
+            _instance_lock.flush()
+        _instance_lock.seek(0)
+        try:
+            msvcrt.locking(_instance_lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            print("Another DeDBot instance is already running.", flush=True)
+            sys.exit(0)
+    # ── Proxy support (--proxy flag) ───────────────────────────────────────────
+    # Pass --proxy <url> to route all game API traffic through a proxy server.
+    # Example: python main.py --proxy http://192.168.1.10:18080
+    # If --proxy is passed without a URL, defaults to http://localhost:18080.
+    # This is required when running behind proxysolution-network.
+    _proxy_url = None
+    if "--proxy" in sys.argv:
+        _proxy_idx = sys.argv.index("--proxy")
+        _proxy_url = (
+            sys.argv[_proxy_idx + 1]
+            if _proxy_idx + 1 < len(sys.argv) and not sys.argv[_proxy_idx + 1].startswith("--")
+            else "http://localhost:18080"
+        )
+        os.environ.setdefault("HTTP_PROXY",  _proxy_url)
+        os.environ.setdefault("HTTPS_PROXY", _proxy_url)
+        os.environ.setdefault("http_proxy",  _proxy_url)
+        os.environ.setdefault("https_proxy", _proxy_url)
+
+    # Display startup header
+    _version = "unknown"
+    if os.path.exists("version"):
+        with open("version", "r") as f:
+            _version = f.read().strip()
+    _flags = []
+    if '--autoupdate' in sys.argv: _flags.append('--autoupdate')
+    if '--no-update' in sys.argv: _flags.append('--no-update')
+    if '--no-venv' in sys.argv: _flags.append('--no-venv')
+    if '--no-dm' in sys.argv: _flags.append('--no-dm')
+    if '--repair' in sys.argv: _flags.append('--repair')
+    if '--break-system-packages' in sys.argv: _flags.append('--break-system-packages')
+    if _proxy_url: _flags.append('--proxy')
+    startup.header(_version, f"{sys.version_info.major}.{sys.version_info.minor}", _flags or None)
+    if _proxy_url:
+        startup.info(f"Routing player traffic through proxy: {_proxy_url}")
 
     # Check for mutually exclusive flags
     mutually_exclusive_flags = ["--autoupdate", "--no-update", "--repair"]
     active_flags = [flag for flag in mutually_exclusive_flags if flag in sys.argv]
     
     if len(active_flags) > 1:
-        print(F.RED + f"Error: {' and '.join(active_flags)} flags are mutually exclusive." + R)
-        print("Use --autoupdate to automatically install updates without prompting.")
-        print("Use --no-update to skip all update checks.")
-        print("Use --repair to force reinstall/repair missing or corrupted files.")
+        startup.error_box(
+            "Invalid Arguments",
+            f"{' and '.join(active_flags)} flags are mutually exclusive.\n"
+            "--autoupdate: automatically install updates without prompting\n"
+            "--no-update: skip all update checks\n"
+            "--repair: force reinstall/repair missing or corrupted files"
+        )
         sys.exit(1)
 
-    def restart_bot():
-        python = sys.executable
-        script_path = os.path.abspath(sys.argv[0])
-        # Filter out --no-venv and --repair from restart args to avoid loops
-        filtered_args = [arg for arg in sys.argv[1:] if arg not in ["--no-venv", "--repair"]]
-        args = [python, script_path] + filtered_args
-
-        if sys.platform == "win32":
-            # For Windows, provide direct venv command like initial setup
-            print(F.YELLOW + "Please restart the bot manually to continue:" + R)
-            print(F.CYAN + f"  1. Ensure CMD or PowerShell is open in this directory: {os.getcwd()}" + R)
-            
-            venv_path = "bot_venv"
-            venv_python_name = os.path.join(venv_path, "Scripts", "python.exe")
-            print(F.CYAN + "  2. Run this exact command: " + F.GREEN + f"{venv_python_name} {os.path.basename(script_path)}" + R)
-            sys.exit(0)
-        else:
-            # For non-Windows, try automatic restart
-            print(F.YELLOW + "Restarting bot..." + R)
-            try:
-                subprocess.Popen(args)
-                os._exit(0)
-            except Exception as e:
-                print(f"Error restarting: {e}")
-                os.execl(python, python, script_path, *sys.argv[1:])
-            
     def install_packages(requirements_txt_path: str, debug: bool = False) -> bool:
         """Install packages from requirements.txt file using pip install -r."""
         full_command = [sys.executable, "-m", "pip", "install", "-r", requirements_txt_path, "--no-cache-dir"]
-        
+
+        if break_system_packages_arg():
+            full_command.append("--break-system-packages")
+
         try:
             if debug:
-                subprocess.check_call(full_command, timeout=1200)
-            else:
-                subprocess.check_call(full_command, timeout=1200, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.check_call(full_command, timeout=1200, env=_pip_env())
+                return True
+            # Capture output so a failure shows pip's reason, not a bare exit code.
+            result = subprocess.run(full_command, timeout=1200, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, env=_pip_env())
+            if result.returncode != 0:
+                tail = (result.stdout or "").strip().splitlines()[-15:]
+                startup.phase_fail("Update failed",
+                                   details=["Failed to install requirements (pip "
+                                            f"exit {result.returncode}):", *tail],
+                                   fix="pip install -r requirements.txt")
+                return False
             return True
         except Exception as e:
-            if debug:
-                print(f"Failed to install requirements: {e}")
+            startup.phase_fail("Update failed",
+                               details=[f"Failed to install requirements: {e}"],
+                               fix="pip install -r requirements.txt")
             return False
     
     async def check_and_update_files():
         beta_mode = "--beta" in sys.argv
         repair_mode = "--repair" in sys.argv
+        # Auto-detect beta installs (version starts with "beta-") so --repair stays on the same channel.
+        if repair_mode and not beta_mode and os.path.exists("version"):
+            with open("version", "r") as f:
+                if f.read().strip().startswith("beta-"):
+                    beta_mode = True
+                    print("  Repair detected a beta install — repairing from the main branch instead of the latest release.")
         release_info = get_latest_release_info(beta_mode=beta_mode)
         
         if release_info:
@@ -633,42 +751,44 @@ if __name__ == "__main__":
             
             # Check current version
             if repair_mode:
-                print(F.YELLOW + f"Repair mode: Forcing reinstall from {latest_tag}" + R)
+                print(f"  Repair mode: Forcing reinstall from {latest_tag}")
                 current_version = "repair-mode"  # Force update in repair mode
             elif os.path.exists("version"):
                 with open("version", "r") as f:
                     current_version = f.read().strip()
-                if beta_mode:
-                    print(F.YELLOW + f"Beta mode: Comparing latest commit from main branch" + R)
             else:
                 current_version = "v0.0.0"
-                if beta_mode:
-                    print(F.YELLOW + f"Beta mode: Comparing latest commit from main branch" + R)
 
-            if not repair_mode:
-                print(F.CYAN + f"Current version: {current_version}" + R)
+            # Only move to a strictly newer release; beta/repair always proceed.
+            # A stale mirror (e.g. GitLab behind GitHub) must never downgrade us.
+            is_upgrade = repair_mode or beta_mode or _is_newer_version(latest_tag, current_version)
 
-            if current_version != latest_tag or repair_mode:
+            if (current_version != latest_tag and is_upgrade) or repair_mode:
                 if repair_mode:
-                    print(F.YELLOW + f"Repairing installation using: {latest_tag} (from {source_name})" + R)
-                    print("This will overwrite existing files and restore any missing components.")
+                    print(f"  Repairing installation using: {latest_tag} (from {source_name})")
+                    print("  This will overwrite existing files and restore any missing components.")
                 else:
-                    print(F.YELLOW + f"New version available: {latest_tag} (from {source_name})" + R)
-                    print("Update Notes:")
-                    print(release_info["body"])
+                    startup.update_available(latest_tag, source_name)
+                    print(f"  Update Notes: {release_info['body']}")
                 print()
-                
+
                 update = False
-                
+
                 if not is_container():
                     if "--autoupdate" in sys.argv or repair_mode:
                         update = True
+                    elif not sys.stdin or not sys.stdin.isatty():
+                        # Headless host: input() would raise EOFError and crash-loop startup while an update is pending.
+                        startup.phase_fail(
+                            "Update skipped",
+                            details=["Non-interactive terminal - run with --autoupdate to install updates automatically"],
+                        )
+                        return
                     else:
-                        print("Note: If your terminal is not interactive, you can use the --autoupdate argument to skip this prompt.")
-                        ask = input("Do you want to update? (y/n): ").strip().lower()
+                        print("  Note: If your terminal is not interactive, you can use the --autoupdate argument to skip this prompt.")
+                        ask = input("  Do you want to update? (y/n): ").strip().lower()
                         update = ask == "y"
                 else:
-                    print(F.YELLOW + "Running in a container. Skipping update prompt." + R)
                     update = True
                     
                 if update:
@@ -676,46 +796,47 @@ if __name__ == "__main__":
                     if os.path.exists("requirements.txt"):
                         try:
                             shutil.copy2("requirements.txt", "requirements.old")
-                        except Exception as e:
-                            print(F.YELLOW + f"Could not backup requirements.txt: {e}" + R)
-                    
+                        except Exception:
+                            pass  # Silent backup failure
+
                     if os.path.exists("db") and os.path.isdir("db"):
-                        print(F.YELLOW + "Making backup of database..." + R)
-                        
                         db_bak_path = "db.bak"
                         if os.path.exists(db_bak_path) and os.path.isdir(db_bak_path):
                             if not safe_remove(db_bak_path): # Create a timestamped backup to avoid upgrading without first having a backup
                                 db_bak_path = f"db.bak_{int(datetime.now().timestamp())}"
-                                print(F.YELLOW + f"WARNING: Couldn't remove db.bak folder: {e}. Making backup with timestamp instead." + R)
 
                         try:
                             shutil.copytree("db", db_bak_path)
-                            print(F.GREEN + f"Backup completed: db → {db_bak_path}" + R)
-                        except Exception as e:
-                            print(F.RED + f"WARNING: Failed to create database backup: {e}" + R)
-                                            
+                        except Exception:
+                            pass  # Database backup failed, continue anyway
+
                     download_url = release_info["download_url"]
                     if not download_url:
-                        print(F.RED + "No download URL available for this release" + R)
+                        startup.phase_fail("Update failed", details=["No download URL available for this release"])
                         return
-                        
-                    print(F.YELLOW + f"Downloading update from {source_name}..." + R)
+
+                    startup.phase_start(f"Downloading update from {source_name}")
                     safe_remove("package.zip")
-                    download_resp = requests.get(download_url, timeout=600)
-                    
+                    try:
+                        download_resp = requests.get(download_url, timeout=600)
+                    except Exception as e:
+                        # A network blip must skip this update attempt, not kill startup.
+                        startup.phase_fail("Update failed", details=[f"Download error: {e}"])
+                        return
+
                     if download_resp.status_code == 200:
                         with open("package.zip", "wb") as f:
                             f.write(download_resp.content)
                         
                         if os.path.exists("update") and os.path.isdir("update"):
                             if not safe_remove("update"):
-                                print(F.RED + "WARNING: Could not remove previous update directory" + R)
+                                startup.phase_fail("Update failed", details=["Could not remove previous update directory"])
                                 return
-                            
+
                         try:
                             shutil.unpack_archive("package.zip", "update", "zip")
                         except Exception as e:
-                            print(F.RED + f"ERROR: Failed to extract update package: {e}" + R)
+                            startup.phase_fail("Update failed", details=[f"Failed to extract update package: {e}"])
                             return
                             
                         safe_remove("package.zip")
@@ -734,42 +855,33 @@ if __name__ == "__main__":
                             try:
                                 if os.path.exists("main.py"):
                                     os.rename("main.py", "main.py.bak")
-                            except Exception as e:
-                                print(F.YELLOW + f"Could not backup main.py: {e}" + R)
+                            except Exception:
                                 # If backup fails, just remove the current file
-                                if safe_remove("main.py"):
-                                    print(F.YELLOW + "Removed current main.py" + R)
-                                else:
-                                    print(F.RED + "Warning: Could not backup or remove current main.py" + R)
-                            
+                                safe_remove("main.py")
+
                             try:
                                 shutil.copy2(main_py_path, "main.py")
                             except Exception as e:
-                                print(F.RED + f"ERROR: Could not install new main.py: {e}" + R)
+                                startup.phase_fail("Update failed", details=[f"Could not install new main.py: {e}"])
                                 return
                             
                         requirements_path = os.path.join(update_dir, "requirements.txt")
-                        if os.path.exists(requirements_path):                      
-                            print(F.YELLOW + "Installing any new requirements..." + R)
-                            
+                        if os.path.exists(requirements_path):
                             success = install_packages(requirements_path, debug="--verbose" in sys.argv or "--debug" in sys.argv)
-                            
+
                             if success:
-                                print(F.GREEN + "New requirements installed." + R)
-                                
                                 # Copy new requirements.txt to working directory before cleanup
                                 try:
                                     if os.path.exists("requirements.txt"):
                                         safe_remove("requirements.txt", is_dir=False)
                                     shutil.copy2(requirements_path, "requirements.txt")
-                                    print(F.GREEN + "Updated requirements.txt" + R)
-                                except Exception as e:
-                                    print(F.YELLOW + f"Warning: Could not update requirements.txt: {e}" + R)
-                                
+                                except Exception:
+                                    pass  # Silent requirements.txt copy failure
+
                                 # Now cleanup removed packages (comparing old vs new)
                                 cleanup_removed_packages()
                             else:
-                                print(F.RED + "Failed to install requirements." + R)
+                                # install_packages already reported pip's real error.
                                 return
                             
                             # Remove the requirements.txt from update folder after copying
@@ -817,45 +929,149 @@ if __name__ == "__main__":
                                                 safe_remove(backup_path, is_dir=False)
                                             # Copy current file to backup
                                             shutil.copy2(dst_path, backup_path)
-                                        except Exception as e:
-                                            print(F.YELLOW + f"Could not create backup of {dst_path}: {e}" + R)
-                                        
+                                        except Exception:
+                                            pass  # Silent backup failure
+
                                 try:
                                     shutil.copy2(src_path, dst_path)
-                                except Exception as e:
-                                    print(F.RED + f"Failed to copy {file} to {dst_path}: {e}" + R)
+                                except Exception:
+                                    pass  # Silent copy failure
                         
-                        if not safe_remove("update"):
-                            print(F.RED + "WARNING: update folder could not be removed. You may want to remove it manually." + R)
-                        
+                        safe_remove("update")
+
                         with open("version", "w") as f:
                             f.write(latest_tag)
-                        
-                        print(F.GREEN + f"Update completed successfully from {source_name}." + R)
-                        
-                        restart_bot()
+
+                        startup.phase_ok(f"Update completed ({latest_tag} from {source_name})")
+
+                        restart_process()
                     else:
-                        print(F.RED + f"Failed to download the update from {source_name}. HTTP status: {download_resp.status_code}" + R)
-                        return  
+                        startup.phase_fail("Update failed", details=[f"HTTP {download_resp.status_code} from {source_name}"])
+                        return
+            else:
+                if current_version != latest_tag and not is_upgrade:
+                    startup.phase_ok(f"Ignored older {source_name} release {latest_tag}; staying on {current_version}")
+                else:
+                    startup.up_to_date(current_version, source_name)
         else:
-            print(F.RED + "Failed to fetch latest release info from all sources" + R)
+            startup.phase_fail("Update check failed", details=["Could not fetch release info from any source"])
         
     import asyncio
     from datetime import datetime
             
-    # Handle update/repair logic
-    if "--repair" in sys.argv:
-        asyncio.run(check_and_update_files())
-    elif "--no-update" in sys.argv:
-        print(F.YELLOW + "Update check skipped due to --no-update flag." + R)
+    # Handle update/repair logic (--repair is detected inside check_and_update_files)
+    if "--no-update" in sys.argv:
+        startup.phase_ok("Update check skipped")
     else:
         asyncio.run(check_and_update_files())
             
     import discord
     from discord.ext import commands
     import sqlite3
+    import logging
+    import logging.handlers
+
+    def setup_logging():
+        """Configure centralized logging with category-based file handlers."""
+        log_dir = 'log'
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Common formatter
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        simple_formatter = logging.Formatter('%(asctime)s - %(message)s')
+
+        # Category mappings: logger name prefix -> log file
+        categories = {
+            'alliance': 'alliance.txt',
+            'gift': 'gift.txt',
+            'redemption': 'redemption.txt',
+            'notification': 'notification.txt',
+            'bot': 'bot.txt',
+        }
+
+        # Create rotating file handlers for each category
+        handlers = {}
+        for category, filename in categories.items():
+            handler = logging.handlers.RotatingFileHandler(
+                os.path.join(log_dir, filename),
+                maxBytes=2 * 1024 * 1024,  # 2MB
+                backupCount=1,
+                encoding='utf-8'
+            )
+            # Use simple formatter for redemption log
+            if category == 'redemption':
+                handler.setFormatter(simple_formatter)
+            else:
+                handler.setFormatter(formatter)
+            handler.setLevel(logging.INFO)
+            handlers[category] = handler
+
+        # Configure loggers for each category
+        for category, handler in handlers.items():
+            logger = logging.getLogger(category)
+            logger.setLevel(logging.INFO)
+            logger.propagate = False
+            if not logger.hasHandlers():
+                logger.addHandler(handler)
+
+        # Configure root logger with console output only
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.ERROR)  # Only show errors on console
+
+    setup_logging()
+
+    # Silence tqdm progress bars (RapidOCR's model downloads emit them
+    # straight to stderr, which logging can't intercept).
+    os.environ.setdefault('TQDM_DISABLE', '1')
+
+    # Route RapidOCR / onnxruntime chatter to log/rapidocr.txt instead of
+    # the console. Those libraries attach their own StreamHandlers at
+    # import time, which bypass propagate/level on the parent logger;
+    # we have to clear those handlers explicitly before attaching ours.
+    rapidocr_log_path = os.path.join('log', 'rapidocr.txt')
+    rapidocr_handler = logging.handlers.RotatingFileHandler(
+        rapidocr_log_path, maxBytes=2 * 1024 * 1024, backupCount=1, encoding='utf-8',
+    )
+    rapidocr_handler.setFormatter(
+        logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    )
+    rapidocr_handler.setLevel(logging.INFO)
+    for noisy_logger in ['RapidOCR', 'rapidocr', 'rapidocr.main', 'rapidocr.base',
+                         'rapidocr.download_file', 'onnxruntime']:
+        _noisy = logging.getLogger(noisy_logger)
+        for h in list(_noisy.handlers):
+            _noisy.removeHandler(h)
+        _noisy.setLevel(logging.INFO)
+        _noisy.propagate = False
+        _noisy.addHandler(rapidocr_handler)
+
+    # Stdout filter: redirect tagged print() calls from cogs to log files
+    class _ConsoleFilter:
+        PATTERNS = ['[ERROR]', '[WARNING]', '[INFO]', '[SYNC]', '[ORPHAN CHECK]',
+                    '[AUTO-DISABLE]', '[MONITOR]', '[RapidOCR]']
+
+        def __init__(self, original):
+            self._original = original
+            self._logger = logging.getLogger('bot')
+
+        def write(self, text):
+            stripped = text.strip()
+            if stripped and any(stripped.startswith(p) for p in self.PATTERNS):
+                self._logger.info(stripped)
+            else:
+                self._original.write(text)
+
+        def flush(self):
+            self._original.flush()
+
+        def __getattr__(self, name):
+            return getattr(self._original, name)
+
+    sys.stdout = _ConsoleFilter(sys.stdout)
 
     class CustomBot(commands.Bot):
+        no_dm: bool = False
+
         async def on_error(self, event_name, *args, **kwargs):
             if event_name == "on_interaction":
                 error = sys.exc_info()[1]
@@ -864,7 +1080,7 @@ if __name__ == "__main__":
             
             await super().on_error(event_name, *args, **kwargs)
 
-        async def on_command_error(self, ctx, error):
+        async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
             if isinstance(error, discord.NotFound) and error.code == 10062:
                 return
             await super().on_command_error(ctx, error)
@@ -873,8 +1089,7 @@ if __name__ == "__main__":
     intents.message_content = True
 
     bot = CustomBot(command_prefix="/", intents=intents)
-
-    init(autoreset=True)
+    bot.no_dm = '--no-dm' in sys.argv
 
     token_file = "bot_token.txt"
     if not os.path.exists(token_file):
@@ -887,8 +1102,6 @@ if __name__ == "__main__":
 
     if not os.path.exists("db"):
         os.makedirs("db")
-        
-        print(F.GREEN + "db folder created" + R)
 
     databases = {
         "conn_alliance": "db/alliance.sqlite",
@@ -899,8 +1112,6 @@ if __name__ == "__main__":
     }
 
     connections = {name: sqlite3.connect(path) for name, path in databases.items()}
-
-    print(F.GREEN + "Database connections have been successfully established." + R)
 
     def create_tables():
         with connections["conn_changes"] as conn_changes:
@@ -922,25 +1133,122 @@ if __name__ == "__main__":
 
         with connections["conn_settings"] as conn_settings:
             conn_settings.execute("""CREATE TABLE IF NOT EXISTS botsettings (
-                id INTEGER PRIMARY KEY, 
-                channelid INTEGER, 
-                giftcodestatus TEXT 
+                id INTEGER PRIMARY KEY,
+                channelid INTEGER,
+                giftcodestatus TEXT
             )""")
-            
+
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS bot_global_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT
+            )""")
+
             conn_settings.execute("""CREATE TABLE IF NOT EXISTS admin (
-                id INTEGER PRIMARY KEY, 
+                id INTEGER PRIMARY KEY,
                 is_initial INTEGER
+            )""")
+
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS process_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                priority INTEGER NOT NULL,
+                alliance_id INTEGER,
+                details TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            )""")
+            conn_settings.execute("""CREATE INDEX IF NOT EXISTS idx_process_queue_status_priority
+                ON process_queue(status, priority, id)""")
+
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS ocr_channel_settings (
+                channel_id INTEGER PRIMARY KEY,
+                alliance_id INTEGER NOT NULL,
+                post_info_message INTEGER DEFAULT 1,
+                pin_info_message INTEGER DEFAULT 1,
+                info_message_id INTEGER,
+                auto_delete_screenshots INTEGER DEFAULT 1
+            )""")
+            try:
+                conn_settings.execute("SELECT auto_delete_screenshots FROM ocr_channel_settings LIMIT 1")
+            except sqlite3.OperationalError:
+                conn_settings.execute(
+                    "ALTER TABLE ocr_channel_settings ADD COLUMN auto_delete_screenshots INTEGER DEFAULT 1"
+                )
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS ocr_channel_event_keywords (
+                channel_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                PRIMARY KEY (channel_id, event_type, keyword)
+            )""")
+            conn_settings.execute("""CREATE INDEX IF NOT EXISTS idx_ocr_keywords_channel
+                ON ocr_channel_event_keywords(channel_id)""")
+
+            # Explicit "event enabled on this channel" registry, decoupled
+            # from keywords so an admin can enable an event with zero keywords
+            # and let the fingerprint regex classify it on its own.
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS ocr_channel_enabled_events (
+                channel_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                PRIMARY KEY (channel_id, event_type)
+            )""")
+            conn_settings.execute("""CREATE INDEX IF NOT EXISTS idx_ocr_enabled_channel
+                ON ocr_channel_enabled_events(channel_id)""")
+            # One-time backfill: every (channel, event) that already has keywords
+            # is now also marked explicitly enabled. Idempotent.
+            conn_settings.execute("""INSERT OR IGNORE INTO ocr_channel_enabled_events
+                (channel_id, event_type)
+                SELECT DISTINCT channel_id, event_type FROM ocr_channel_event_keywords""")
+
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS permission_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                target_id INTEGER NOT NULL,
+                before_state TEXT,
+                after_state TEXT,
+                timestamp TEXT NOT NULL
+            )""")
+            conn_settings.execute("""CREATE INDEX IF NOT EXISTS idx_permission_audit_timestamp
+                ON permission_audit_log(timestamp DESC)""")
+
+            # Per-alliance opt-in channel summary posted after each redemption.
+            # No row = disabled (default). Buckets choose what the summary lists.
+            conn_settings.execute("""CREATE TABLE IF NOT EXISTS redemption_summary_settings (
+                alliance_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                show_success INTEGER NOT NULL DEFAULT 0,
+                show_already INTEGER NOT NULL DEFAULT 0,
+                show_failed INTEGER NOT NULL DEFAULT 1
             )""")
 
         with connections["conn_users"] as conn_users:
             conn_users.execute("""CREATE TABLE IF NOT EXISTS users (
-                fid INTEGER PRIMARY KEY, 
-                nickname TEXT, 
-                furnace_lv INTEGER DEFAULT 0, 
-                kid INTEGER, 
-                stove_lv_content TEXT, 
+                fid INTEGER PRIMARY KEY,
+                nickname TEXT,
+                furnace_lv INTEGER DEFAULT 0,
+                kid INTEGER,
+                stove_lv_content TEXT,
                 alliance TEXT
             )""")
+            _users_columns_to_add = [
+                ("power",                   "INTEGER"),
+                ("power_updated_at",        "TEXT"),
+                ("combat_power",            "INTEGER"),
+                ("combat_power_updated_at", "TEXT"),
+                ("discord_id",              "INTEGER"),
+                ("discord_server_id",       "INTEGER"),
+                ("discord_id_updated_at",   "TEXT"),
+                ("state_mismatch_at",       "TEXT"),
+            ]
+            for _col, _typ in _users_columns_to_add:
+                try:
+                    conn_users.execute(f"SELECT {_col} FROM users LIMIT 1")
+                except sqlite3.OperationalError:
+                    conn_users.execute(f"ALTER TABLE users ADD COLUMN {_col} {_typ}")
+            conn_users.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id)"
+            )
 
         with connections["conn_giftcode"] as conn_giftcode:
             conn_giftcode.execute("""CREATE TABLE IF NOT EXISTS gift_codes (
@@ -949,61 +1257,363 @@ if __name__ == "__main__":
             )""")
             
             conn_giftcode.execute("""CREATE TABLE IF NOT EXISTS user_giftcodes (
-                fid INTEGER, 
-                giftcode TEXT, 
-                status TEXT, 
+                fid INTEGER,
+                giftcode TEXT,
+                status TEXT,
+                last_attempt_at TEXT,
                 PRIMARY KEY (fid, giftcode),
                 FOREIGN KEY (giftcode) REFERENCES gift_codes (giftcode)
             )""")
+            # Upgrade path: per-account attempt timestamp for the redeem-results viewer.
+            uc_cols = [row[1] for row in conn_giftcode.execute("PRAGMA table_info(user_giftcodes)").fetchall()]
+            if "last_attempt_at" not in uc_cols:
+                conn_giftcode.execute("ALTER TABLE user_giftcodes ADD COLUMN last_attempt_at TEXT")
 
         with connections["conn_alliance"] as conn_alliance:
             conn_alliance.execute("""CREATE TABLE IF NOT EXISTS alliancesettings (
-                alliance_id INTEGER PRIMARY KEY, 
-                channel_id INTEGER, 
+                alliance_id INTEGER PRIMARY KEY,
+                channel_id INTEGER,
                 interval INTEGER
             )""")
-            
-            conn_alliance.execute("""CREATE TABLE IF NOT EXISTS alliance_list (
-                alliance_id INTEGER PRIMARY KEY, 
-                name TEXT
-            )""")
 
-        print(F.GREEN + "All tables checked." + R)
+            # Per-alliance toggle: auto-remove a member detected (at gift redemption)
+            # to have left this single-state alliance's state. Off by default.
+            try:
+                conn_alliance.execute("SELECT auto_remove_on_transfer FROM alliancesettings LIMIT 1")
+            except sqlite3.OperationalError:
+                conn_alliance.execute(
+                    "ALTER TABLE alliancesettings ADD COLUMN auto_remove_on_transfer INTEGER DEFAULT 0"
+                )
+
+            # Per-alliance gate for who can upload screenshots in the
+            # Screenshot Upload channels (0 = anyone, 1 = bot admins only).
+            try:
+                conn_alliance.execute("SELECT ocr_upload_admin_only FROM alliancesettings LIMIT 1")
+            except sqlite3.OperationalError:
+                conn_alliance.execute(
+                    "ALTER TABLE alliancesettings ADD COLUMN ocr_upload_admin_only INTEGER DEFAULT 0"
+                )
+
+            # Per-alliance toggle for @silent sync posts (0 = ring, 1 = no notification ping).
+            try:
+                conn_alliance.execute("SELECT silent_notifications FROM alliancesettings LIMIT 1")
+            except sqlite3.OperationalError:
+                conn_alliance.execute(
+                    "ALTER TABLE alliancesettings ADD COLUMN silent_notifications INTEGER DEFAULT 0"
+                )
+
+            # Dedicated gift-redemption progress channel
+            try:
+                conn_alliance.execute("SELECT redemption_channel_id FROM alliancesettings LIMIT 1")
+            except sqlite3.OperationalError:
+                conn_alliance.execute(
+                    "ALTER TABLE alliancesettings ADD COLUMN redemption_channel_id INTEGER"
+                )
+                conn_alliance.execute(
+                    "UPDATE alliancesettings SET redemption_channel_id = channel_id"
+                )
+
+            # Sync Log is gone - inherit it as the redemption log, once only.
+            with connections["conn_settings"] as _cs:
+                _cs.execute("""CREATE TABLE IF NOT EXISTS bot_global_settings (
+                    setting_key TEXT PRIMARY KEY, setting_value TEXT)""")
+                _done = _cs.execute(
+                    "SELECT 1 FROM bot_global_settings WHERE setting_key = 'sync_log_migrated'"
+                ).fetchone()
+            if not _done:
+                conn_alliance.execute(
+                    "UPDATE alliancesettings SET redemption_channel_id = channel_id "
+                    "WHERE redemption_channel_id IS NULL AND channel_id IS NOT NULL"
+                )
+                with connections["conn_settings"] as _cs:
+                    _cs.execute(
+                        "INSERT OR REPLACE INTO bot_global_settings VALUES ('sync_log_migrated', '1')"
+                    )
+
+            conn_alliance.execute("""CREATE TABLE IF NOT EXISTS alliance_list (
+                alliance_id INTEGER PRIMARY KEY,
+                name TEXT,
+                discord_server_id INTEGER,
+                kid INTEGER
+            )""")
+            # Upgrade path: ensure discord_server_id exists before any cog queries it.
+            existing_cols = [row[1] for row in conn_alliance.execute("PRAGMA table_info(alliance_list)").fetchall()]
+            if "discord_server_id" not in existing_cols:
+                conn_alliance.execute("ALTER TABLE alliance_list ADD COLUMN discord_server_id INTEGER")
+            # Upgrade path: per-alliance state lock. NULL = no restriction (legacy behaviour).
+            if "kid" not in existing_cols:
+                conn_alliance.execute("ALTER TABLE alliance_list ADD COLUMN kid INTEGER")
+            # Upgrade path: multistate flag - members span many states, never auto-bind to one.
+            if "multistate" not in existing_cols:
+                conn_alliance.execute("ALTER TABLE alliance_list ADD COLUMN multistate INTEGER DEFAULT 0")
+            # Upgrade path: separate the deliberate state-lock from the (auto-bindable) home state.
+            # Any alliance that already had a kid set was an intentional lock -> preserve it.
+            if "state_locked" not in existing_cols:
+                conn_alliance.execute("ALTER TABLE alliance_list ADD COLUMN state_locked INTEGER DEFAULT 0")
+                conn_alliance.execute("UPDATE alliance_list SET state_locked = 1 WHERE kid IS NOT NULL")
 
     create_tables()
+    startup.phase_ok("Database ready")
 
     async def load_cogs():
-        cogs = ["olddb", "control", "alliance", "alliance_member_operations", "bot_operations", "logsystem", "support_operations", "gift_operations", "changes", "w", "wel", "other_features", "bear_trap", "id_channel", "backup_operations", "bear_trap_editor", "attendance", "attendance_report", "minister_schedule", "minister_menu"]
-        
+        cogs = ["pimp_my_bot", "process_queue", "onnx_lifecycle", "bot_main_menu", "alliance", "alliance_member_operations", "alliance_sync", "bot_operations", "alliance_logs", "bot_support", "bot_health", "gift_operations", "alliance_history", "alliance_w_command", "bot_startup", "notification_system", "notification_schedule", "alliance_id_channel", "alliance_channels", "bot_backup", "notification_editor", "notification_templates", "notification_wizard", "attendance", "attendance_report", "attendance_ocr", "minister_schedule", "minister_menu", "minister_archive", "alliance_registration", "bear_track"]
+
         failed_cogs = []
-        
-        for cog in cogs:
-            try:
-                await bot.load_extension(f"cogs.{cog}")
-            except Exception as e:
-                print(f"✗ Failed to load cog {cog}: {e}")
-                failed_cogs.append(cog)
-        
+
+        # Suppress all console output during cog loading to prevent
+        # third-party libraries (RapidOCR, onnxruntime) from spamming.
+        logging.disable(logging.INFO)
+        with open(os.devnull, 'w') as devnull, \
+                contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            for cog in cogs:
+                try:
+                    await bot.load_extension(f"cogs.{cog}")
+                except Exception as e:
+                    failed_cogs.append((cog, str(e)))
+        logging.disable(logging.NOTSET)
+
+        total = len(cogs)
+        loaded = total - len(failed_cogs)
         if failed_cogs:
-            print(F.RED + f"\n⚠️  {len(failed_cogs)} cog(s) failed to load:" + R)
-            for cog in failed_cogs:
-                print(F.YELLOW + f"   • {cog}" + R)
-            print(F.YELLOW + "\nThe bot will continue with reduced functionality." + R)
-            print(F.YELLOW + "To fix missing or corrupted files, run: " + F.GREEN + "python main.py --repair" + R)
-            print(F.YELLOW + "This will download and restore all files from the latest release.\n" + R)
+            startup.phase_fail(
+                f"{loaded}/{total} modules loaded",
+                details=[f"{cog}: {error}" for cog, error in failed_cogs],
+                fix="python main.py --repair"
+            )
+        else:
+            startup.phase_ok(f"{loaded}/{total} modules loaded")
 
     @bot.event
     async def on_ready():
         try:
-            print(f"{F.GREEN}Logged in as {F.CYAN}{bot.user}{R}")
-            await bot.tree.sync()
+            startup.phase_ok(f"Connected to Discord as {bot.user}")
+            # Sync once per process — on_ready re-fires on reconnect; commands are static.
+            if not getattr(bot, '_commands_synced', False):
+                startup.phase_start("Syncing slash commands with Discord")
+                await bot.tree.sync()
+                bot._commands_synced = True
+                startup.phase_ok("Slash commands synced with Discord")
+
+            # API health checks
+            try:
+                import aiohttp as _aio
+                # trust_env so HTTPS_PROXY is honored, matching the redemption path.
+                timeout = _aio.ClientTimeout(total=5)
+                async with _aio.ClientSession(timeout=timeout, trust_env=True) as session:
+                    startup.phase_start("Checking Gift Code Distribution API")
+                    headers = {'X-API-Key': 'super_secret_bot_token_nobody_will_ever_find'}
+                    url = "http://gift-code-api.whiteout-bot.com/giftcode_api.php"
+
+                    async def _probe_distribution():
+                        try:
+                            async with session.get(url, headers=headers) as resp:
+                                if resp.status < 500:
+                                    return "ok", None
+                                return "error", f"HTTP {resp.status}"
+                        except TimeoutError:
+                            return "error", "Timed out"
+                        except _aio.ClientError:
+                            return "error", "Offline (connection failed)"
+
+                    # One retry so a single transient blip doesn't read as offline.
+                    state, detail = await _probe_distribution()
+                    if state != "ok":
+                        state, detail = await _probe_distribution()
+                    startup.api_status("Gift Code Distribution API", state, detail)
+
+                try:
+                    startup.phase_start("Checking Gift Code Redemption API")
+                    health = bot.get_cog("BotHealth")
+                    if health is not None:
+                        result = await health.check_wos_api_status()
+                        ok = result.get("status") in ("healthy", "warning")
+                        detail = result.get("message")   # "Online" is implied by "Connected to"
+                        startup.api_status("Gift Code Redemption API", "ok" if ok else "error",
+                                           None if detail == "Online" else detail)
+                    else:
+                        startup.api_status("Gift Code Redemption API", "error", "Health cog not loaded")
+                except Exception:
+                    startup.api_status("Gift Code Redemption API", "error", "Check failed")
+
+                # OCR status last, after both API checks, for a clean order.
+                try:
+                    from cogs.bear_track import remote_ocr_url, OCR_REMOTE_TOKEN
+                    ocr_url = remote_ocr_url()
+                    if not ocr_url:
+                        startup.phase_ok("Using local OCR")
+                    else:
+                        startup.phase_start("Checking External OCR Service")
+                        try:
+                            async with _aio.ClientSession(timeout=timeout, trust_env=True) as ocr_session:
+                                async with ocr_session.get(
+                                    f"{ocr_url}/health",
+                                    headers={"X-API-Key": OCR_REMOTE_TOKEN},
+                                ) as resp:
+                                    ok = resp.status == 200
+                                    ocr_detail = None if ok else f"HTTP {resp.status}"
+                            startup.api_status("External OCR Service", "ok" if ok else "error", ocr_detail)
+                        except Exception:
+                            startup.api_status("External OCR Service", "error", "Unreachable (using local OCR)")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            # Summary with per-alliance breakdown
+            alliance_details = []
+            try:
+                import sqlite3 as _sq
+                with _sq.connect('db/alliance.sqlite') as _c:
+                    alliances = _c.execute("SELECT alliance_id, name FROM alliance_list ORDER BY name").fetchall()
+                    alliance_count = len(alliances)
+                with _sq.connect('db/users.sqlite') as _c:
+                    member_count = _c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+                    for aid, name in alliances:
+                        count = _c.execute("SELECT COUNT(*) FROM users WHERE alliance = ?", (aid,)).fetchone()[0]
+                        alliance_details.append((name, count))
+            except Exception:
+                alliance_count = 0
+                member_count = 0
+
+            startup.summary(len(bot.guilds), alliance_count, member_count, alliance_details or None)
+
+            # Wait briefly for cog on_ready handlers to complete, then show DM status
+            await asyncio.sleep(2)
+            if getattr(bot, 'no_dm', False):
+                startup.info("Startup DM skipped")
+            elif getattr(bot, 'startup_dm_sent', False):
+                startup.info("Startup DM sent to Global Admin")
+
+            startup.ready()
         except Exception as e:
+            logging.getLogger('bot').error(f"Error syncing commands: {e}")
             print(f"Error syncing commands: {e}")
 
     async def main():
         await load_cogs()
-        
-        await bot.start(bot_token)
 
-    if __name__ == "__main__":
-        asyncio.run(main())
+        startup.phase_start("Connecting to Discord")
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                await bot.start(bot_token)
+                break  # Clean exit if bot.start() returns normally
+
+            except discord.LoginFailure:
+                startup.error_box("Login Failed", "Invalid bot token.", "Check your bot_token.txt file.\nGuide: https://github.com/whiteout-project/bot/wiki/Creating-a-Discord-Application")
+                break
+
+            except discord.PrivilegedIntentsRequired:
+                startup.error_box("Login Failed", "Privileged intents not enabled.", "Follow steps 5+ at:\nhttps://github.com/whiteout-project/bot/wiki/Creating-a-Discord-Application")
+                break
+
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    startup.connection_retry(attempt, "rate limited", 60)
+                    await asyncio.sleep(60)
+                elif e.status >= 500:
+                    startup.connection_retry(attempt, f"server error (HTTP {e.status})", 30)
+                    await asyncio.sleep(30)
+                else:
+                    startup.connection_retry(attempt, f"HTTP {e.status}", 30)
+                    await asyncio.sleep(30)
+
+            except discord.GatewayNotFound:
+                startup.connection_retry(attempt, "gateway unavailable", 30)
+                await asyncio.sleep(30)
+
+            except (aiohttp.ClientConnectorDNSError, aiohttp.ClientConnectorError):
+                startup.connection_retry(attempt, "connection failed", 30)
+                await asyncio.sleep(30)
+
+            except OSError as e:
+                if e.errno in (-3, 11001):  # DNS errors (Linux/Windows)
+                    startup.connection_retry(attempt, "DNS failed", 30)
+                    await asyncio.sleep(30)
+                else:
+                    raise
+
+    def run_bot():
+        import signal
+
+        async def start_bot():
+            """Start the bot with proper shutdown handling."""
+            stop_event = asyncio.Event()
+
+            def signal_handler():
+                if is_container():
+                    print(f"\n  Received shutdown signal. Shutting down gracefully...")
+                else:
+                    print(f"\n  {startup.shutdown()}")
+                stop_event.set()
+
+            loop = asyncio.get_running_loop()
+
+            # Register signal handlers
+            if sys.platform != "win32":
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    loop.add_signal_handler(sig, signal_handler)
+            else:
+                # Windows doesn't support add_signal_handler, use traditional signal
+                def win_handler(signum, frame):
+                    signal_handler()
+                signal.signal(signal.SIGINT, win_handler)
+
+            # Start bot in background task
+            bot_task = asyncio.create_task(main())
+
+            # Wait for either bot to finish or shutdown signal
+            shutdown_task = asyncio.create_task(stop_event.wait())
+            done, pending = await asyncio.wait(
+                [bot_task, shutdown_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Cancel pending tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Cancel background loops + the queue worker up front so shutdown
+            # doesn't wait on idle ticks. Bypasses ProcessQueue's 30s reload-drain.
+            try:
+                from discord.ext import tasks as _tasks_mod
+                loop_tasks = []
+                for cog in list(bot.cogs.values()):
+                    for attr in dir(cog):
+                        try:
+                            obj = getattr(cog, attr)
+                        except Exception:
+                            continue
+                        if isinstance(obj, _tasks_mod.Loop):
+                            obj.cancel()
+                            t = obj.get_task()
+                            if t is not None:
+                                loop_tasks.append(t)
+                pq = bot.get_cog("ProcessQueue")
+                if pq is not None:
+                    pq._shutting_down = True
+                    pq._wake_event.set()
+                    pqt = getattr(pq, "_processor_task", None)
+                    if pqt is not None and not pqt.done():
+                        pqt.cancel()
+                        loop_tasks.append(pqt)
+                if loop_tasks:
+                    await asyncio.wait(loop_tasks, timeout=3.0)
+            except Exception as e:
+                print(f"  Background-task shutdown hiccup: {e}")
+
+            # Properly close the bot and await completion
+            if not bot.is_closed():
+                await bot.close()
+
+        try:
+            asyncio.run(start_bot())
+        except KeyboardInterrupt:
+            pass  # Already handled by signal handler
+
+    run_bot()

@@ -1,13 +1,17 @@
+"""
+Minister rotation logic. Handles scheduling, swaps, and automatic role assignments.
+"""
 import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
 import sqlite3
-import aiohttp
-import hashlib
-from aiohttp_socks import ProxyConnector
-import time
+import logging
 import re
+from datetime import datetime
+from .pimp_my_bot import theme
+
+logger = logging.getLogger('bot')
 
 try:
     import arabic_reshaper
@@ -16,7 +20,6 @@ try:
 except ImportError:
     ARABIC_SUPPORT = False
 
-SECRET = 'tB87#kPtkxqOS2'
 
 class ChannelSelectView(discord.ui.View):
     def __init__(self, bot, context: str):
@@ -79,7 +82,7 @@ class ChannelSelect(discord.ui.ChannelSelect):
                                     try:
                                         old_message = await old_channel.fetch_message(message_id)
                                         await old_message.delete()
-                                    except:
+                                    except Exception:
                                         pass  # Message might already be deleted
                             
                             # Remove the message reference so it will be recreated in the new channel
@@ -108,20 +111,20 @@ class ChannelSelect(discord.ui.ChannelSelect):
             if minister_menu_cog and self.context.endswith("channel"):
                 # Return to channel configuration menu with confirmation
                 embed = discord.Embed(
-                    title="📝 Channel Setup",
+                    title=f"{theme.editListIcon} Channel Setup",
                     description=(
-                        f"✅ **{self.context}** set to <#{channel_id}>\n\n"
-                        "Configure channels for minister scheduling:\n\n"
-                        "**Channel Types**\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "🔨 **Construction Channel** - Shows available Construction Day slots\n"
-                        "🔬 **Research Channel** - Shows available Research Day slots\n"
-                        "⚔️ **Training Channel** - Shows available Training Day slots\n"
-                        "📄 **Log Channel** - Receives add/remove notifications\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        "Select a channel type to configure:"
+                        f"{theme.verifiedIcon} **{self.context}** set to <#{channel_id}>\n\n"
+                        f"Configure channels for minister scheduling:\n\n"
+                        f"**Channel Types**\n"
+                        f"{theme.upperDivider}\n"
+                        f"{theme.settingsIcon} **Construction Channel** - Shows available Construction Day slots\n"
+                        f"{theme.searchIcon} **Research Channel** - Shows available Research Day slots\n"
+                        f"{theme.allianceIcon} **Training Channel** - Shows available Training Day slots\n"
+                        f"{theme.documentIcon} **Log Channel** - Receives add/remove notifications\n"
+                        f"{theme.lowerDivider}\n\n"
+                        f"Select a channel type to configure:"
                     ),
-                    color=discord.Color.green()
+                    color=theme.emColor3
                 )
 
                 # Get the ChannelConfigurationView from minister_menu
@@ -139,33 +142,43 @@ class ChannelSelect(discord.ui.ChannelSelect):
             else:
                 # Fallback for other contexts
                 await interaction.response.edit_message(
-                    content=f"✅ `{self.context}` set to <#{channel_id}>.\n\nChannel configured successfully!",
+                    content=f"{theme.verifiedIcon} `{self.context}` set to <#{channel_id}>.\n\nChannel configured successfully!",
                     view=None
                 )
 
         except Exception as e:
             try:
                 await interaction.response.send_message(
-                    f"❌ Failed to update:\n```{e}```",
+                    f"{theme.deniedIcon} Failed to update:\n```{e}```",
                     ephemeral=True
                 )
             except discord.InteractionResponded:
                 await interaction.followup.send(
-                    f"❌ Failed to update:\n```{e}```",
+                    f"{theme.deniedIcon} Failed to update:\n```{e}```",
                     ephemeral=True
                 )
 
 class MinisterSchedule(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.users_conn = sqlite3.connect('db/users.sqlite')
+        self.users_conn = sqlite3.connect('db/users.sqlite', timeout=30.0, check_same_thread=False)
         self.users_cursor = self.users_conn.cursor()
-        self.settings_conn = sqlite3.connect('db/settings.sqlite')
+        self.settings_conn = sqlite3.connect('db/settings.sqlite', timeout=30.0, check_same_thread=False)
         self.settings_cursor = self.settings_conn.cursor()
-        self.alliance_conn = sqlite3.connect('db/alliance.sqlite')
+        self.alliance_conn = sqlite3.connect('db/alliance.sqlite', timeout=30.0, check_same_thread=False)
         self.alliance_cursor = self.alliance_conn.cursor()
-        self.svs_conn = sqlite3.connect("db/svs.sqlite")
+        self.svs_conn = sqlite3.connect("db/svs.sqlite", timeout=30.0, check_same_thread=False)
         self.svs_cursor = self.svs_conn.cursor()
+
+        # Enable WAL mode for better concurrent access
+        self.users_conn.execute("PRAGMA journal_mode=WAL")
+        self.users_conn.execute("PRAGMA synchronous=NORMAL")
+        self.settings_conn.execute("PRAGMA journal_mode=WAL")
+        self.settings_conn.execute("PRAGMA synchronous=NORMAL")
+        self.alliance_conn.execute("PRAGMA journal_mode=WAL")
+        self.alliance_conn.execute("PRAGMA synchronous=NORMAL")
+        self.svs_conn.execute("PRAGMA journal_mode=WAL")
+        self.svs_conn.execute("PRAGMA synchronous=NORMAL")
 
         self.svs_cursor.execute("""
                     CREATE TABLE IF NOT EXISTS appointments (
@@ -193,24 +206,15 @@ class MinisterSchedule(commands.Cog):
 
         self.svs_conn.commit()
 
-    async def fetch_user_data(self, fid, proxy=None):
-        url = 'https://wos-giftcode-api.centurygame.com/api/player'
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        current_time = int(time.time() * 1000)
-        form = f"fid={fid}&time={current_time}"
-        sign = hashlib.md5((form + SECRET).encode('utf-8')).hexdigest()
-        form = f"sign={sign}&{form}"
-
+    async def cog_unload(self):
+        """Close database connections when cog is unloaded."""
         try:
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post(url, headers=headers, data=form, ssl=False) as response:
-                    if response.status == 200:
-                        return await response.json()
-                    else:
-                        return response.status
-        except Exception as e:
-            return None
+            self.users_conn.close()
+            self.settings_conn.close()
+            self.alliance_conn.close()
+            self.svs_conn.close()
+        except Exception:
+            pass
 
     async def send_embed_to_channel(self, embed):
         """Sends the embed message to a specific channel."""
@@ -220,13 +224,50 @@ class MinisterSchedule(commands.Cog):
         if log_channel:
             await log_channel.send(embed=embed)
         else:
-            print(f"Error: Could not find the log channel please change it to a valid channel")
+            logger.error("Could not find the minister log channel; please change it to a valid channel")
+            print("Error: Could not find the log channel please change it to a valid channel")
 
     async def is_admin(self, user_id: int) -> bool:
         if user_id == self.bot.owner_id:
             return True
         self.settings_cursor.execute("SELECT 1 FROM admin WHERE id=?", (user_id,))
         return self.settings_cursor.fetchone() is not None
+
+    async def log_change(self, action_type: str, user, appointment_type: str = None, fid: int = None,
+                        nickname: str = None, old_time: str = None, new_time: str = None,
+                        alliance_name: str = None, additional_data: str = None, archive_id: int = None):
+        """
+        Log a change to the minister change history table.
+
+        Args:
+            action_type: Type of action (add, remove, reschedule, clear_all, time_slot_mode_change, archive_created)
+            user: Discord user object who made the change
+            appointment_type: Type of appointment (Construction Day, Research Day, etc.)
+            fid: User FID
+            nickname: User nickname
+            old_time: Previous time slot (for reschedule)
+            new_time: New time slot (for add/reschedule)
+            alliance_name: Alliance name
+            additional_data: JSON string with extra context
+            archive_id: Archive ID if this change is associated with an archive
+        """
+        try:
+            timestamp = datetime.now().isoformat()
+            discord_user_id = user.id
+            discord_username = user.display_name
+
+            self.svs_cursor.execute("""
+                INSERT INTO minister_change_history
+                (archive_id, timestamp, discord_user_id, discord_username, action_type,
+                 appointment_type, fid, nickname, old_time, new_time, alliance_name, additional_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (archive_id, timestamp, discord_user_id, discord_username, action_type,
+                  appointment_type, fid, nickname, old_time, new_time, alliance_name, additional_data))
+
+            self.svs_conn.commit()
+        except Exception as e:
+            logger.error(f"Error logging change: {e}")
+            print(f"Error logging change: {e}")
 
     def fix_arabic(self, text):
         """
@@ -272,17 +313,6 @@ class MinisterSchedule(commands.Cog):
 
         return time_slots
 
-    async def show_minister_channel_menu(self, interaction: discord.Interaction):
-        # Redirect to the MinisterMenu cog
-        minister_cog = self.bot.get_cog("MinisterMenu")
-        if minister_cog:
-            await minister_cog.show_minister_channel_menu(interaction)
-        else:
-            await interaction.response.send_message(
-                "❌ Minister Menu module not found.",
-                ephemeral=True
-            )
-
     # Autocomplete handler for appointment type
     async def appointment_autocomplete(self, interaction: discord.Interaction, current: str):
         try:
@@ -298,6 +328,7 @@ class MinisterSchedule(commands.Cog):
 
             return filtered_choices
         except Exception as e:
+            logger.error(f"Error in appointment type autocomplete: {e}")
             print(f"Error in appointment type autocomplete: {e}")
             return []
 
@@ -335,6 +366,7 @@ class MinisterSchedule(commands.Cog):
 
             return filtered_choices
         except Exception as e:
+            logger.error(f"Autocomplete for fid failed: {e}")
             print(f"Autocomplete for fid failed: {e}")
             return []
 
@@ -376,6 +408,7 @@ class MinisterSchedule(commands.Cog):
 
             return filtered_choices
         except Exception as e:
+            logger.error(f"Autocomplete for registered fid failed: {e}")
             print(f"Autocomplete for registered fid failed: {e}")
             return []
 
@@ -430,6 +463,7 @@ class MinisterSchedule(commands.Cog):
 
             return filtered_choices
         except Exception as e:
+            logger.error(f"Error in time autocomplete: {e}")
             print(f"Error in time autocomplete: {e}")
             return []
 
@@ -448,77 +482,11 @@ class MinisterSchedule(commands.Cog):
 
             return filtered_choices
         except Exception as e:
+            logger.error(f"Error in all_or_available autocomplete: {e}")
             print(f"Error in all_or_available autocomplete: {e}")
             return []
 
-    # handler for looping through all times and updating fids to current nickname
-    async def update_time_list(self, booked_times, progress_callback=None):
-        """
-        Generates a list of time slots with their booking details, fetching nicknames from the API.
-        Implements rate limit handling and batch processing.
-        """
-        time_list = []
-        booked_fids = {}
-
-        fids_to_fetch = {fid for fid, _ in booked_times.values() if fid}
-        fetched_data = {}  # Cache API responses
-
-        # Get current slot mode
-        self.svs_cursor.execute("SELECT context_id FROM reference WHERE context=?", ("slot_mode",))
-        row = self.svs_cursor.fetchone()
-        slot_mode = int(row[0]) if row else 0
-
-        # Generate time slots based on mode
-        time_slots = self.get_time_slots(slot_mode)
-
-        for time_slot in time_slots:
-            booked_fid, booked_alliance = booked_times.get(time_slot, ("", ""))
-
-            booked_nickname = "Unknown"
-            if booked_fid:
-                # Check cache first
-                if booked_fid not in fetched_data:
-                    while True:
-                        if progress_callback:
-                            await progress_callback(len(fetched_data), len(fids_to_fetch), waiting=False)
-
-                        data = await self.fetch_user_data(booked_fid)
-                        if isinstance(data, dict) and "data" in data:
-                            fetched_data[booked_fid] = data["data"].get("nickname", "Unknown")
-                            if progress_callback: # Immediate progress update after successful fetch
-                                await progress_callback(len(fetched_data), len(fids_to_fetch), waiting=False)
-                            break
-                        elif data == 429:
-                            if progress_callback:
-                                await progress_callback(len(fetched_data), len(fids_to_fetch), waiting=True)
-                            await asyncio.sleep(60) # Rate limit, wait and retry
-                        else:
-                            fetched_data[booked_fid] = "Unknown"
-                            if progress_callback: # Immediate progress update even for failed fetch
-                                await progress_callback(len(fetched_data), len(fids_to_fetch), waiting=False)
-                            break
-
-                booked_nickname = fetched_data.get(booked_fid, "Unknown")
-
-                # Fetch alliance name
-                self.alliance_cursor.execute("SELECT name FROM alliance_list WHERE alliance_id=?", (booked_alliance,))
-                alliance_data = self.alliance_cursor.fetchone()
-                booked_alliance_name = alliance_data[0] if alliance_data else "Unknown"
-
-                # Wrap nickname in LTR embedding to prevent line reversal
-                time_list.append(f"`{time_slot}` - [{booked_alliance_name}]\u202a{booked_nickname}\u202c - {booked_fid}")
-            else:
-                time_list.append(f"`{time_slot}` - ")
-
-            booked_fids[time_slot] = booked_fid
-
-            # Update progress after processing each time slot
-            if progress_callback:
-                await progress_callback(len(fetched_data), len(fids_to_fetch), waiting=False)
-
-        return time_list, booked_fids
-
-    # handler for looping through all times without updating fids
+    # handler for looping through all times, reading current nicknames from the database
     def generate_time_list(self, booked_times):
         """
         Generates a list of time slots with their booking details.
@@ -608,6 +576,40 @@ class MinisterSchedule(commands.Cog):
 
         return time_list
 
+    def split_message_content(self, header: str, time_list: list, max_length: int = 1900) -> list:
+        """
+        Splits message content into chunks that fit within Discord's character limit.
+        Returns a list of message strings.
+        """
+        if not time_list:
+            return [header]
+
+        messages = []
+        current_lines = []
+        current_length = len(header) + 1  # for newline after header
+
+        for line in time_list:
+            line_length = len(line) + 1
+            if current_length + line_length > max_length:
+                # Save current chunk
+                if current_lines:
+                    messages.append(header + "\n" + "\n".join(current_lines))
+                else:
+                    messages.append(header)
+                current_lines = [line]
+                current_length = len(header) + 1 + line_length
+            else:
+                current_lines.append(line)
+                current_length += line_length
+
+        # Add remaining lines
+        if current_lines:
+            messages.append(header + "\n" + "\n".join(current_lines))
+        elif not messages:
+            messages.append(header)
+
+        return messages
+
     # handler to get minister channel
     async def get_channel_id(self, context: str):
         self.svs_cursor.execute("SELECT context_id FROM reference WHERE context=?", (context,))
@@ -616,6 +618,11 @@ class MinisterSchedule(commands.Cog):
 
     # handler to get minister message from channel to edit it
     async def get_or_create_message(self, context: str, message_content: str, channel: discord.TextChannel):
+        # Check if content exceeds Discord's 2000 character limit
+        if len(message_content) > 1900:
+            truncated_content = message_content[:1850] + "\n\n*... (list truncated due to length)*"
+            message_content = truncated_content
+
         self.svs_cursor.execute("SELECT context_id FROM reference WHERE context=?", (context,))
         row = self.svs_cursor.fetchone()
 
@@ -662,6 +669,7 @@ class MinisterSchedule(commands.Cog):
                 return None
 
     @discord.app_commands.command(name='minister_add', description='Book an appointment slot for a user.')
+    @app_commands.rename(fid='id')
     @app_commands.autocomplete(appointment_type=appointment_autocomplete, fid=fid_autocomplete, time=time_autocomplete)
     async def minister_add(self, interaction: discord.Interaction, appointment_type: str, fid: str, time: str):
         if not await self.is_admin(interaction.user.id):
@@ -705,6 +713,7 @@ class MinisterSchedule(commands.Cog):
                     )
                     return
                 except Exception as e:
+                    logger.error(f"Failed to select channel: {e}")
                     print(f"Failed to select channel: {e}")
                     await interaction.followup.send(f"Could not select the channel: {e}")
                     return
@@ -717,6 +726,7 @@ class MinisterSchedule(commands.Cog):
                     )
                     return
                 except Exception as e:
+                    logger.error(f"Failed to select channel: {e}")
                     print(f"Failed to select channel: {e}")
                     await interaction.followup.send(f"Could not select the channel: {e}")
                     return
@@ -794,26 +804,26 @@ class MinisterSchedule(commands.Cog):
                                       (fid, appointment_type, normalized_time, alliance_id))
             self.svs_conn.commit()
 
+            # Log the change
+            await self.log_change(
+                action_type="add",
+                user=interaction.user,
+                appointment_type=appointment_type,
+                fid=int(fid),
+                nickname=nickname,
+                old_time=None,
+                new_time=normalized_time,
+                alliance_name=alliance_name
+            )
+
             # Try to get the avatar image
-            try:
-                data = await self.fetch_user_data(fid)
-
-                if isinstance(data, int) and data == 429:
-                    # Rate limit hit
-                    avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
-                elif data and "data" in data and "avatar_image" in data["data"]:
-                    avatar_image = data["data"]["avatar_image"]
-                else:
-                    avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
-
-            except Exception as e:
-                avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
+            avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
 
             # Send embed confirmation to log channel
             embed = discord.Embed(
                 title=f"Player added to {appointment_type}",
                 description=f"{nickname} ({fid}) from **{alliance_name}** at {normalized_time}",
-                color=discord.Color.green()
+                color=theme.emColor3
             )
             embed.set_thumbnail(url=avatar_image)
             embed.set_author(name=f"Added by {interaction.user.display_name}", icon_url=interaction.user.avatar.url)
@@ -843,10 +853,12 @@ class MinisterSchedule(commands.Cog):
             await self.get_or_create_message(context, message_content, channel)
 
         except Exception as e:
+            logger.error(f"minister_add unexpected error: {e}")
             print(f"An unexpected error occurred: {e}")
             await interaction.followup.send(f"An unexpected error occurred while processing the request: {e}")
 
     @discord.app_commands.command(name='minister_remove', description='Cancel an appointment slot for a user.')
+    @app_commands.rename(fid='id')
     @app_commands.autocomplete(appointment_type=appointment_autocomplete, fid=registered_fid_autocomplete)
     async def minister_remove(self, interaction: discord.Interaction, appointment_type: str, fid: str):
         if not await self.is_admin(interaction.user.id):
@@ -889,6 +901,7 @@ class MinisterSchedule(commands.Cog):
                     )
                     return
                 except Exception as e:
+                    logger.error(f"Failed to select channel: {e}")
                     print(f"Failed to select channel: {e}")
                     await interaction.followup.send(f"Could not select the channel: {e}")
                     return
@@ -901,6 +914,7 @@ class MinisterSchedule(commands.Cog):
                     )
                     return
                 except Exception as e:
+                    logger.error(f"Failed to select channel: {e}")
                     print(f"Failed to select channel: {e}")
                     await interaction.followup.send(f"Could not select the channel: {e}")
                     return
@@ -909,39 +923,47 @@ class MinisterSchedule(commands.Cog):
             self.svs_cursor.execute("SELECT * FROM appointments WHERE fid=? AND appointment_type=?", (fid, appointment_type))
             booking = self.svs_cursor.fetchone()
 
-            # Fetch nickname for the user
-            self.users_cursor.execute("SELECT nickname FROM users WHERE fid=?", (fid,))
+            # Fetch nickname and alliance for the user
+            self.users_cursor.execute("SELECT nickname, alliance FROM users WHERE fid=?", (fid,))
             user = self.users_cursor.fetchone()
             nickname = user[0] if user else "Unknown"
-            
+            alliance_id = user[1] if user else None
+
             if not booking:
                 await interaction.followup.send(f"{nickname} is not on the minister list for {appointment_type}.")
                 return
+
+            # Get alliance name for logging
+            alliance_name = None
+            if alliance_id:
+                self.alliance_cursor.execute("SELECT name FROM alliance_list WHERE alliance_id=?", (alliance_id,))
+                alliance_result = self.alliance_cursor.fetchone()
+                alliance_name = alliance_result[0] if alliance_result else None
 
             # Remove the appointment
             self.svs_cursor.execute("DELETE FROM appointments WHERE fid=? AND appointment_type=?", (fid, appointment_type))
             self.svs_conn.commit()
 
+            # Log the change
+            await self.log_change(
+                action_type="remove",
+                user=interaction.user,
+                appointment_type=appointment_type,
+                fid=int(fid),
+                nickname=nickname,
+                old_time=None,
+                new_time=None,
+                alliance_name=alliance_name
+            )
+
             # Try to get the avatar image
-            try:
-                data = await self.fetch_user_data(fid)
-
-                if isinstance(data, int) and data == 429:
-                    # Rate limit hit
-                    avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
-                elif data and "data" in data and "avatar_image" in data["data"]:
-                    avatar_image = data["data"]["avatar_image"]
-                else:
-                    avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
-
-            except Exception as e:
-                avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
+            avatar_image = "https://gof-formal-avatar.akamaized.net/avatar-dev/2023/07/17/1001.png"
 
             # Send embed confirmation to log channel
             embed = discord.Embed(
                 title=f"Player removed from {appointment_type}",
                 description=f"{nickname} ({fid})",
-                color=discord.Color.red()
+                color=theme.emColor2
             )
             embed.set_thumbnail(url=avatar_image)
             embed.set_author(name=f"Removed by {interaction.user.display_name}", icon_url=interaction.user.avatar.url)
@@ -967,6 +989,7 @@ class MinisterSchedule(commands.Cog):
             await self.get_or_create_message(context, message_content, channel)
 
         except Exception as e:
+            logger.error(f"minister_remove error: {e}")
             print(f"An error occurred: {e}")
             await interaction.followup.send(f"An error occurred while canceling the slot: {e}")
 
@@ -996,9 +1019,9 @@ class MinisterSchedule(commands.Cog):
         try:
             # Send a confirmation prompt
             embed = discord.Embed(
-                title=f"⚠️ Confirm clearing {appointment_type} list.",
+                title=f"{theme.warnIcon} Confirm clearing {appointment_type} list.",
                 description=f"Are you sure you want to remove all minister appointment slots for: {appointment_type}?\n"
-                            f"**🚨This action cannot be undone and all names will be removed🚨**.\n"
+                            f"**{theme.warnIcon} This action cannot be undone and all names will be removed {theme.warnIcon}**.\n"
                             f"You have 10 seconds to reply with 'Yes' to confirm or 'No' to cancel.",
                 color=discord.Color.orange()
             )
@@ -1015,16 +1038,22 @@ class MinisterSchedule(commands.Cog):
                     # Retrieve booked times before deletion
                     self.svs_cursor.execute("SELECT time, fid, alliance FROM appointments WHERE appointment_type=?", (appointment_type,))
                     booked_times = {row[0]: (row[1], row[2]) for row in self.svs_cursor.fetchall()}
-                
+
                     # Generate available times list
                     time_list, _ = self.generate_time_list(booked_times)
-                    message_content = f"**Previous {appointment_type} schedule** (before clearing):\n" + "\n".join(time_list)
-                    clear_list_embed = discord.Embed(
-                        title=f"Cleared {appointment_type}",
-                        description=message_content,
-                        color=discord.Color.orange()
-                    )
-                    await self.send_embed_to_channel(clear_list_embed)
+
+                    # Split into chunks if too long for embed description (4096 char limit)
+                    header = f"**Previous {appointment_type} schedule** (before clearing):"
+                    message_chunks = self.split_message_content(header, time_list, max_length=4000)
+
+                    for i, chunk in enumerate(message_chunks):
+                        title = f"Cleared {appointment_type}" if i == 0 else f"Cleared {appointment_type} (continued)"
+                        clear_list_embed = discord.Embed(
+                            title=title,
+                            description=chunk,
+                            color=discord.Color.orange()
+                        )
+                        await self.send_embed_to_channel(clear_list_embed)
 
                     # Regenerate empty list of available times
                     booked_times = {}
@@ -1032,35 +1061,41 @@ class MinisterSchedule(commands.Cog):
 
                     message_content = f"**{appointment_type}** available slots:\n" + "\n".join(time_list)
 
-                    # Get the channel and message to update
-                    self.svs_cursor.execute("SELECT context_id FROM reference WHERE context=?", (context,))
-                    msg_row = self.svs_cursor.fetchone()
-
+                    # Get the channel to update
                     self.svs_cursor.execute("SELECT context_id FROM reference WHERE context=?", (channel_context,))
                     channel_row = self.svs_cursor.fetchone()
 
-                    if msg_row and channel_row:
-                        message_id = int(msg_row[0])
+                    if channel_row:
                         channel_id = int(channel_row[0])
                         channel = log_guild.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-                        message = await channel.fetch_message(message_id)
-                        await message.edit(content=message_content)
-
+                        await self.get_or_create_message(context, message_content, channel)
                     else:
                         await confirmation_message.reply(f"[Warning] Could not find message or channel for {appointment_type}, skipping message update.\n\nNext time you run the `/minister_add` command that channel will be used")
 
                     self.svs_cursor.execute("DELETE FROM appointments WHERE appointment_type=?", (appointment_type,))
                     self.svs_conn.commit()
 
+                    # Log the change
+                    await self.log_change(
+                        action_type="clear_all",
+                        user=interaction.user,
+                        appointment_type=appointment_type,
+                        fid=None,
+                        nickname=None,
+                        old_time=None,
+                        new_time=None,
+                        alliance_name=None
+                    )
+
                     embed = discord.Embed(
                         title=f"Cleared {appointment_type} list",
                         description=f"All appointments for {appointment_type} have been successfully removed.",
-                        color=discord.Color.red()
+                        color=theme.emColor2
                     )
                     embed.set_author(name=f"Cleared by {interaction.user.display_name}", icon_url=interaction.user.avatar.url)
 
                     await self.send_embed_to_channel(embed)
-                    await interaction.followup.send(f"✅ Deleted all {appointment_type} appointments.")
+                    await interaction.followup.send(f"{theme.verifiedIcon} Deleted all {appointment_type} appointments.")
                 else:
                     await confirmation_message.reply(f"Cancelled the action. Nothing was removed from {appointment_type}.")
 
@@ -1069,6 +1104,7 @@ class MinisterSchedule(commands.Cog):
                 await confirmation_message.reply(f"<@{interaction.user.id}> did not respond in time. The action has been cancelled.")
 
         except Exception as e:
+            logger.error(f"minister_clear_all error: {e}")
             print(f"An error occurred: {e}")
             await interaction.followup.send(f"An error occurred while clearing the appointments: {e}", ephemeral=True)
         
@@ -1076,10 +1112,9 @@ class MinisterSchedule(commands.Cog):
     @app_commands.autocomplete(appointment_type=appointment_autocomplete, all_or_available=choice_autocomplete)
     @app_commands.describe(
         appointment_type="The type of minister appointment to view.",
-        all_or_available="Show full schedule or only available slots.", 
-        update="Default: False. Whether to update names via API or not. Will take some time if enabled."
+        all_or_available="Show full schedule or only available slots.",
     )
-    async def minister_list(self, interaction: discord.Interaction, appointment_type: str, all_or_available: str, update: bool = False):
+    async def minister_list(self, interaction: discord.Interaction, appointment_type: str, all_or_available: str):
         try:
             await interaction.response.defer()
 
@@ -1088,26 +1123,7 @@ class MinisterSchedule(commands.Cog):
             booked_times = {row[0]: (row[1], row[2]) for row in self.svs_cursor.fetchall()}
 
             if all_or_available == "all":
-                if update:
-                    async def update_progress(checked, total, waiting):
-                        if checked % 1 == 0:
-                            color = discord.Color.orange() if waiting else discord.Color.green()
-                            title = "waiting 60 seconds before continuing" if waiting else "Updating names"
-                            embed = discord.Embed(
-                                title=title,
-                                description=f"Checked {checked}/{total} minister appointees",
-                                color=color
-                            )
-                            try:
-                                await interaction.edit_original_response(embed=embed)
-                            except discord.NotFound:
-                                print("Interaction expired before progress update.")
-
-                    # Fetch updated data via API
-                    time_list, _ = await self.update_time_list(booked_times, update_progress)
-                else:
-                    # Use database method
-                    time_list, _ = self.generate_time_list(booked_times)
+                time_list, _ = self.generate_time_list(booked_times)
 
                 # Format the time list for the embed
                 time_list = "\n".join(time_list)
@@ -1116,12 +1132,12 @@ class MinisterSchedule(commands.Cog):
                     embed = discord.Embed(
                         title=f"Schedule for {appointment_type}",
                         description=time_list,
-                        color=discord.Color.blue()
+                        color=theme.emColor1
                     )
                     try:
                         await interaction.edit_original_response(embed=embed)
                     except discord.NotFound:
-                        print("Interaction expired before final update.")
+                        pass  # Interaction expired; nothing to do
 
             elif all_or_available == "available only":
                 available_slots = self.generate_available_time_list(booked_times)
@@ -1132,8 +1148,155 @@ class MinisterSchedule(commands.Cog):
                     await interaction.followup.send(f"All appointment slots are filled for {appointment_type}")
 
         except Exception as e:
+            logger.error(f"minister_list error: {e}")
             print(f"An error occurred: {e}")
             await interaction.followup.send(f"An error occurred while fetching the schedule: {e}")
+
+    @discord.app_commands.command(name='minister_archive_save', description='Save current minister schedule to an archive (Global Admin only)')
+    @app_commands.describe(name="Optional name for the archive (defaults to current date)")
+    async def minister_archive_save(self, interaction: discord.Interaction, name: str = None):
+        # Check if user is global admin
+        minister_menu_cog = self.bot.get_cog("MinisterMenu")
+        if not minister_menu_cog:
+            await interaction.response.send_message(f"{theme.deniedIcon} Minister Menu module not found.", ephemeral=True)
+            return
+
+        is_admin, is_global_admin, _ = await minister_menu_cog.get_admin_permissions(interaction.user.id)
+        if not is_global_admin:
+            await interaction.response.send_message(f"{theme.deniedIcon} Only global administrators can save archives.", ephemeral=True)
+            return
+
+        # Get archive cog
+        archive_cog = self.bot.get_cog("MinisterArchive")
+        if not archive_cog:
+            await interaction.response.send_message(f"{theme.deniedIcon} Minister Archive module not found.", ephemeral=True)
+            return
+
+        # Generate name if not provided
+        if not name:
+            name = datetime.now().strftime("SvS %Y-%m-%d")
+
+        # Save the current schedule
+        await archive_cog.save_current_schedule(interaction, name)
+
+    @discord.app_commands.command(name='minister_archive_list', description='View all saved minister archives (Global Admin only)')
+    async def minister_archive_list(self, interaction: discord.Interaction):
+        # Check if user is global admin
+        minister_menu_cog = self.bot.get_cog("MinisterMenu")
+        if not minister_menu_cog:
+            await interaction.response.send_message(f"{theme.deniedIcon} Minister Menu module not found.", ephemeral=True)
+            return
+
+        is_admin, is_global_admin, _ = await minister_menu_cog.get_admin_permissions(interaction.user.id)
+        if not is_global_admin:
+            await interaction.response.send_message(f"{theme.deniedIcon} Only global administrators can view archives.", ephemeral=True)
+            return
+
+        # Get archive cog
+        archive_cog = self.bot.get_cog("MinisterArchive")
+        if not archive_cog:
+            await interaction.response.send_message(f"{theme.deniedIcon} Minister Archive module not found.", ephemeral=True)
+            return
+
+        # Show archive list
+        await archive_cog.show_archive_list(interaction)
+
+    async def archive_id_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Autocomplete for archive IDs"""
+        try:
+            # Get all archives
+            self.svs_cursor.execute("""
+                SELECT archive_id, archive_name, created_at
+                FROM minister_archives
+                ORDER BY created_at DESC
+                LIMIT 25
+            """)
+            archives = self.svs_cursor.fetchall()
+
+            choices = []
+            for archive_id, archive_name, created_at in archives:
+                created_date = datetime.fromisoformat(created_at).strftime("%Y-%m-%d")
+                label = f"{archive_name} ({created_date})"
+
+                if current and current.lower() not in label.lower():
+                    continue
+
+                choices.append(discord.app_commands.Choice(name=label[:100], value=archive_id))
+
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in archive autocomplete: {e}")
+            print(f"Error in archive autocomplete: {e}")
+            return []
+
+    @discord.app_commands.command(name='minister_archive_history', description='View change history for minister appointments (Global Admin only)')
+    @app_commands.describe(
+        archive_id="Optional: Select an archive to view its change history (leave empty for current changes)",
+        appointment_type="Optional: Filter by appointment type (Construction/Research/Training Day)",
+        discord_user="Optional: Filter by specific Discord user who made changes"
+    )
+    @app_commands.autocomplete(archive_id=archive_id_autocomplete, appointment_type=appointment_autocomplete)
+    async def minister_archive_history(
+        self,
+        interaction: discord.Interaction,
+        archive_id: int = None,
+        appointment_type: str = None,
+        discord_user: discord.User = None
+    ):
+        # Check if user is global admin
+        minister_menu_cog = self.bot.get_cog("MinisterMenu")
+        if not minister_menu_cog:
+            await interaction.response.send_message(f"{theme.deniedIcon} Minister Menu module not found.", ephemeral=True)
+            return
+
+        is_admin, is_global_admin, _ = await minister_menu_cog.get_admin_permissions(interaction.user.id)
+        if not is_global_admin:
+            await interaction.response.send_message(f"{theme.deniedIcon} Only global administrators can view change history.", ephemeral=True)
+            return
+
+        # Get archive cog
+        archive_cog = self.bot.get_cog("MinisterArchive")
+        if not archive_cog:
+            await interaction.response.send_message(f"{theme.deniedIcon} Minister Archive module not found.", ephemeral=True)
+            return
+
+        # Build query based on filters
+        query = """
+            SELECT
+                timestamp, discord_username, action_type, appointment_type,
+                fid, nickname, old_time, new_time, alliance_name, additional_data
+            FROM minister_change_history
+            WHERE 1=1
+        """
+        params = []
+
+        if archive_id is not None:
+            query += " AND archive_id = ?"
+            params.append(archive_id)
+        else:
+            query += " AND archive_id IS NULL"
+
+        if appointment_type:
+            query += " AND appointment_type = ?"
+            params.append(appointment_type)
+
+        if discord_user:
+            query += " AND discord_user_id = ?"
+            params.append(discord_user.id)
+
+        query += " ORDER BY timestamp DESC"
+
+        self.svs_cursor.execute(query, params)
+        history_records = self.svs_cursor.fetchall()
+
+        if not history_records:
+            await interaction.response.send_message("No change history found with the specified filters.", ephemeral=True)
+            return
+
+        # Show history via archive cog
+        from .minister_archive import ChangeHistoryView
+        view = ChangeHistoryView(self.bot, archive_cog, history_records, page=0, archive_id=archive_id)
+        await archive_cog.update_history_embed(interaction, history_records, 0, archive_id, view)
 
 async def setup(bot):
     await bot.add_cog(MinisterSchedule(bot))
