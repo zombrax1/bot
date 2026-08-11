@@ -1278,12 +1278,34 @@ class MinisterMenu(commands.Cog):
                         new_time=selected_time,
                         alliance_name=alliance_name
                     )
+                    # Log reschedule
+                    await minister_schedule_cog.log_change(
+                        action_type="reschedule",
+                        user=interaction.user,
+                        appointment_type=activity_name,
+                        fid=int(fid),
+                        nickname=nickname,
+                        old_time=old_time,
+                        new_time=selected_time,
+                        alliance_name=alliance_name
+                    )
                 else:
                     # This was a new booking
                     embed = discord.Embed(
                         title=f"Player added to {activity_name}",
                         description=f"{nickname} ({fid}) from **{alliance_name}** at {selected_time}",
                         color=theme.emColor3
+                    )
+                    # Log add
+                    await minister_schedule_cog.log_change(
+                        action_type="add",
+                        user=interaction.user,
+                        appointment_type=activity_name,
+                        fid=int(fid),
+                        nickname=nickname,
+                        old_time=None,
+                        new_time=selected_time,
+                        alliance_name=alliance_name
                     )
                     # Log add
                     await minister_schedule_cog.log_change(

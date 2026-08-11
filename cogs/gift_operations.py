@@ -131,6 +131,9 @@ class GiftOperations(commands.Cog):
         self._revalidation_tasks = {}
         self._auto_redeem_started = set()
 
+        # Batch redemption tracking for consolidated progress messages
+        self.redemption_batches = {}  # batch_id -> {message, alliances: {id: status}, giftcode}
+
         self.processing_stats = {
             "redemption_submissions": 0,
             "server_validation_success": 0,
