@@ -10,27 +10,25 @@ import sqlite3
 import asyncio
 import requests
 import logging
+import subprocess
 from .permission_handler import PermissionManager
 from .pimp_my_bot import theme, safe_edit_message
 
 logger = logging.getLogger('bot')
 
 
-class _UpdateAndRestartView(discord.ui.View):
-    """Single button on the Check-for-Updates ephemeral. Triggers a restart
-    that filters --no-update from the relaunch args so the startup updater
-    can install the pending release."""
+ORIGIN_URL = "https://github.com/zombrax1/bot.git"
+UPSTREAM_URL = "https://github.com/whiteout-project/bot.git"
+
+
+class _UpdateChoiceView(discord.ui.View):
+    """Global-admin update source picker. Each choice has a confirmation step."""
 
     def __init__(self, bot):
         super().__init__(timeout=7200)
         self.bot = bot
 
-    @discord.ui.button(
-        label="Update & Restart",
-        emoji=f"{theme.refreshIcon}",
-        style=discord.ButtonStyle.danger,
-    )
-    async def update_and_restart(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _confirm(self, interaction: discord.Interaction, source: str):
         is_admin, is_global = PermissionManager.is_admin(interaction.user.id)
         if not is_admin or not is_global:
             await interaction.response.send_message(
@@ -38,15 +36,65 @@ class _UpdateAndRestartView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        health_cog = self.bot.get_cog("BotHealth")
-        if not health_cog:
+        label = "ZomBrox Update" if source == "origin" else "Upstream Update"
+        remote = ORIGIN_URL if source == "origin" else UPSTREAM_URL
+        description = (
+            "Fetches your fork and applies it only when it can fast-forward the current branch."
+            if source == "origin" else
+            "Fetches the original project and safely merges it into the current branch. "
+            "Conflicts are aborted; nothing is overwritten or pushed."
+        )
+        embed = discord.Embed(
+            title=f"{theme.warnIcon} Confirm {label}",
+            description=f"{description}\n\n**Source:** `{remote}`\n\nContinue with this update?",
+            color=discord.Color.orange(),
+        )
+        await interaction.response.edit_message(embed=embed, view=_UpdateConfirmView(self.bot, source))
+
+    @discord.ui.button(label="ZomBrox Update", emoji=f"{theme.refreshIcon}",
+                       style=discord.ButtonStyle.primary)
+    async def origin_update(self, interaction, button):
+        await self._confirm(interaction, "origin")
+
+    @discord.ui.button(label="Upstream Update", emoji=f"{theme.refreshIcon}",
+                       style=discord.ButtonStyle.secondary)
+    async def upstream_update(self, interaction, button):
+        await self._confirm(interaction, "upstream")
+
+
+class _UpdateConfirmView(discord.ui.View):
+    def __init__(self, bot, source: str):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.source = source
+
+    @discord.ui.button(label="Confirm Update", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        is_admin, is_global = PermissionManager.is_admin(interaction.user.id)
+        if not is_admin or not is_global:
             await interaction.response.send_message(
-                f"{theme.deniedIcon} Bot Health module not found — cannot restart.",
-                ephemeral=True,
-            )
+                f"{theme.deniedIcon} Only Global Admins can update the bot.", ephemeral=True)
             return
-        await interaction.response.defer()
-        await health_cog.perform_restart(interaction, allow_update=True)
+        button.disabled = True
+        await interaction.response.edit_message(
+            embed=discord.Embed(title=f"{theme.refreshIcon} Updating Bot",
+                description="Checking the worktree and fetching the selected source...",
+                color=discord.Color.yellow()), view=self)
+        cog = self.bot.get_cog("BotOperations")
+        result = await cog.perform_git_update(self.source)
+        color = (discord.Color.green() if result["ok"] else
+                 discord.Color.blue() if result["unchanged"] else discord.Color.red())
+        embed = discord.Embed(title=result["title"], description=result["message"], color=color)
+        embed.add_field(name="Changes", value="Yes" if result["changed"] else "No", inline=True)
+        embed.add_field(name="Update Result", value=result["status"], inline=True)
+        embed.add_field(name="Restart Required", value="Yes" if result["changed"] else "No", inline=True)
+        await interaction.edit_original_response(embed=embed, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="Update Cancelled",
+                description="No repository changes were made.", color=discord.Color.greyple()), view=None)
 
 
 class BotOperations(commands.Cog):
@@ -68,6 +116,98 @@ class BotOperations(commands.Cog):
             return "v0.0.0"
         except Exception:
             return "v0.0.0"
+
+    @staticmethod
+    def _git(*args):
+        """Run git without a shell so Discord input can never become a command."""
+        return subprocess.run(
+            ["git", *args], cwd=os.path.abspath(os.curdir), text=True,
+            capture_output=True, timeout=120, check=False,
+        )
+
+    def _perform_git_update_sync(self, source: str) -> dict:
+        result = {"ok": False, "unchanged": False, "changed": False,
+                  "title": "Update Blocked", "status": "Not run", "message": ""}
+        if source not in {"origin", "upstream"}:
+            result["message"] = "Unknown update source. No changes were made."
+            return result
+
+        expected_url = ORIGIN_URL if source == "origin" else UPSTREAM_URL
+        actual = self._git("remote", "get-url", source)
+        if actual.returncode or actual.stdout.strip().rstrip("/") != expected_url.rstrip("/"):
+            result["message"] = (
+                f"The `{source}` remote is missing or does not match `{expected_url}`. "
+                "Remote roles were not changed and no update was attempted."
+            )
+            return result
+
+        # Tracked edits or an unfinished Git operation make an automatic update unsafe.
+        dirty = self._git("status", "--porcelain", "--untracked-files=no")
+        git_dir = self._git("rev-parse", "--git-dir")
+        if dirty.returncode or dirty.stdout.strip() or git_dir.returncode:
+            result["message"] = (
+                "The checkout has tracked local changes or Git could not inspect it. "
+                "Nothing was fetched, merged, reset, or discarded."
+            )
+            return result
+        git_path = os.path.abspath(git_dir.stdout.strip())
+        if any(os.path.exists(os.path.join(git_path, marker)) for marker in
+               ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")):
+            result["message"] = "A Git merge/rebase operation is already in progress. Nothing was changed."
+            return result
+
+        branch = self._git("branch", "--show-current")
+        if branch.returncode or not branch.stdout.strip():
+            result["message"] = "The checkout is not on a branch. Nothing was changed."
+            return result
+        branch_name = branch.stdout.strip()
+        before = self._git("rev-parse", "HEAD")
+        fetched = self._git("fetch", "--prune", source)
+        if fetched.returncode:
+            result.update(title="Update Failed", status="Fetch failed",
+                          message=f"Git could not fetch `{source}`. No files were changed.\n```\n{(fetched.stderr or fetched.stdout)[-700:]}\n```")
+            return result
+
+        if source == "origin":
+            target = f"origin/{branch_name}"
+            target_check = self._git("rev-parse", "--verify", target)
+            if target_check.returncode:
+                result.update(title="Update Failed", status="Branch not found",
+                              message=f"`{target}` does not exist. No files were changed.")
+                return result
+            merge = self._git("merge", "--ff-only", target)
+        else:
+            target = "upstream/main"
+            target_check = self._git("rev-parse", "--verify", target)
+            if target_check.returncode:
+                result.update(title="Update Failed", status="Branch not found",
+                              message=f"`{target}` does not exist. No files were changed.")
+                return result
+            merge = self._git("merge", "--no-edit", target)
+
+        if merge.returncode:
+            # A conflicting upstream merge is always returned to its exact pre-update state.
+            if os.path.exists(os.path.join(git_path, "MERGE_HEAD")):
+                self._git("merge", "--abort")
+            result.update(title="Update Failed", status="Merge not applied",
+                          message=("The update could not be integrated safely. Any attempted merge "
+                                   "was aborted; local files and untracked runtime data were preserved.\n"
+                                   f"```\n{(merge.stderr or merge.stdout)[-650:]}\n```"))
+            return result
+
+        after = self._git("rev-parse", "HEAD")
+        changed = before.stdout.strip() != after.stdout.strip()
+        if not changed:
+            result.update(unchanged=True, title="Already Up to Date", status="No changes",
+                          message=f"`{target}` has no new changes for this checkout. No restart is required.")
+        else:
+            result.update(ok=True, changed=True, title="Update Successful", status="Merge succeeded",
+                          message=(f"Changes from `{target}` were integrated successfully. "
+                                   "Restart the bot to run the updated code. No remote was pushed."))
+        return result
+
+    async def perform_git_update(self, source: str) -> dict:
+        return await asyncio.to_thread(self._perform_git_update_sync, source)
         
     def setup_database(self):
         try:
@@ -316,82 +456,28 @@ class BotOperations(commands.Cog):
                     )
                     return
 
-                current_version, new_version, update_notes, updates_needed = await self.check_for_updates()
-
-                if not current_version or not new_version:
-                    await interaction.response.send_message(
-                        f"{theme.deniedIcon} Failed to check for updates. Please try again later.", 
-                        ephemeral=True
-                    )
-                    return
-
                 main_embed = discord.Embed(
-                    title=f"{theme.refreshIcon} Bot Update Status",
-                    color=theme.emColor1 if not updates_needed else discord.Color.yellow()
+                    title=f"{theme.refreshIcon} Check for Updates",
+                    description=(
+                        "Choose which trusted source to check. You will be asked to confirm "
+                        "before Git fetches or integrates anything.\n\n"
+                        "**ZomBrox Update**\nUpdates this checkout from your fork "
+                        f"(`{ORIGIN_URL}`). It only applies a safe fast-forward.\n\n"
+                        "**Upstream Update**\nFetches the original project "
+                        f"(`{UPSTREAM_URL}`) and safely merges it into this checkout. "
+                        "Conflicts are aborted; it never overwrites with a reset."
+                    ),
+                    color=theme.emColor1,
                 )
-
                 main_embed.add_field(
-                    name="Current Version",
-                    value=f"`{current_version}`",
-                    inline=True
+                    name="Safety",
+                    value=("Tracked local edits or an unfinished Git operation block the update. "
+                           "Untracked runtime data is preserved. Nothing is pushed to either remote."),
+                    inline=False,
                 )
-
-                main_embed.add_field(
-                    name="Latest Version",
-                    value=f"`{new_version}`",
-                    inline=True
-                )
-
-                if updates_needed:
-                    main_embed.add_field(
-                        name="Status",
-                        value=f"{theme.refreshIcon} **Update Available**",
-                        inline=True
-                    )
-
-                    if update_notes:
-                        notes_text = "\n".join([f"• {note.lstrip('- *•').strip()}" for note in update_notes[:10]])
-                        if len(update_notes) > 10:
-                            notes_text += f"\n• ... and more!"
-                        
-                        main_embed.add_field(
-                            name="Release Notes",
-                            value=notes_text[:1024],  # Discord field limit
-                            inline=False
-                        )
-
-                    # Windows hosts don't auto-restart — flag it so the admin
-                    # knows manual intervention will be needed after the update.
-                    update_help = (
-                        f"Click **Update & Restart** below to install the "
-                        f"update now. The bot will reconnect automatically."
-                    )
-                    if sys.platform == 'win32' and not os.path.exists('/.dockerenv'):
-                        update_help = (
-                            f"Click **Update & Restart** below to install the "
-                            f"update now.\n\n{theme.warnIcon} **Windows host "
-                            f"detected.** The bot will stop after downloading "
-                            f"the update — someone with host access needs to "
-                            f"start it again with `python main.py` for the "
-                            f"update to finish installing."
-                        )
-                    main_embed.add_field(
-                        name="How to Update",
-                        value=update_help,
-                        inline=False
-                    )
-                else:
-                    main_embed.add_field(
-                        name="Status",
-                        value=f"{theme.verifiedIcon} **Up to Date**",
-                        inline=True
-                    )
-                    main_embed.description = "Your bot is running the latest version!"
-
-                view = _UpdateAndRestartView(self.bot) if updates_needed else None
                 await interaction.response.send_message(
                     embed=main_embed,
-                    view=view,
+                    view=_UpdateChoiceView(self.bot),
                     ephemeral=True,
                 )
 
