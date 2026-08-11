@@ -131,8 +131,13 @@ class GiftOperations(commands.Cog):
         self._revalidation_tasks = {}
         self._auto_redeem_started = set()
 
-        # Batch redemption tracking for consolidated progress messages
-        self.redemption_batches = {}  # batch_id -> {message, alliances: {id: status}, giftcode}
+        # Batch redemption tracking (in-memory only, for live progress messages)
+        self.redemption_batches = {}
+
+        # Near-term gift-code re-validation: in-flight backoff tasks per code,
+        # and codes whose auto-redemption has already been started (dedup).
+        self._revalidation_tasks = {}
+        self._auto_redeem_started = set()
 
         self.processing_stats = {
             "redemption_submissions": 0,

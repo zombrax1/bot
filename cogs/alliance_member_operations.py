@@ -2566,7 +2566,8 @@ class IDSearchModal(discord.ui.Modal):
                 with sqlite3.connect('db/alliance.sqlite') as alliance_db:
                     cursor = alliance_db.cursor()
                     cursor.execute("SELECT name FROM alliance_list WHERE alliance_id = ?", (current_alliance_id,))
-                    current_alliance_name = cursor.fetchone()[0]
+                    row = cursor.fetchone()
+                    current_alliance_name = row[0] if row else "Unknown"
 
                 # Handle remove context
                 if self.context == "remove":
@@ -2693,7 +2694,7 @@ class IDSearchModal(discord.ui.Modal):
                             description=f"ID: {alliance_id}",
                             emoji=theme.allianceIcon
                         ) for alliance_id, name, _ in self.alliances
-                        if alliance_id != current_alliance_id
+                        if str(alliance_id) != str(current_alliance_id)
                     ]
                 )
 

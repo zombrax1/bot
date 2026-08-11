@@ -782,10 +782,6 @@ class MinisterArchive(commands.Cog):
     async def show_archive_appointments(self, interaction: discord.Interaction, archive_id: int, appointment_type: str):
         """Show detailed appointment list for a specific activity day in an archive"""
         try:
-            # Get alliance database connection
-            alliance_conn = sqlite3.connect('db/alliance.sqlite')
-            alliance_cursor = alliance_conn.cursor()
-
             # Get appointments for this archive and appointment type
             self.svs_cursor.execute("""
                 SELECT time, fid, nickname, alliance
@@ -811,14 +807,11 @@ class MinisterArchive(commands.Cog):
                 view.add_item(back_button)
 
                 await interaction.response.edit_message(embed=embed, view=view)
-                alliance_conn.close()
                 return
 
             # Create view with appointments
             view = ArchiveAppointmentsView(self.bot, self, archive_id, appointment_type, appointments)
             await self.update_appointments_embed(interaction, view)
-
-            alliance_conn.close()
 
         except Exception as e:
             logger.error(f"Error loading appointments: {e}")
@@ -827,11 +820,10 @@ class MinisterArchive(commands.Cog):
 
     async def update_appointments_embed(self, interaction: discord.Interaction, view: ArchiveAppointmentsView):
         """Update the appointments embed with paginated records"""
+        # Get alliance database connection
+        alliance_conn = sqlite3.connect('db/alliance.sqlite')
+        alliance_cursor = alliance_conn.cursor()
         try:
-            # Get alliance database connection
-            alliance_conn = sqlite3.connect('db/alliance.sqlite')
-            alliance_cursor = alliance_conn.cursor()
-
             # Calculate page boundaries
             start_idx = view.page * 25
             end_idx = min(start_idx + 25, len(view.appointments))
@@ -862,6 +854,8 @@ class MinisterArchive(commands.Cog):
         except Exception as e:
             logger.error(f"Error updating appointments embed: {e}")
             print(f"Error updating appointments embed: {e}")
+        finally:
+            alliance_conn.close()
 
     async def show_channel_selector_for_post(self, interaction: discord.Interaction, archive_id: int, appointment_type: str, appointments):
         """Show channel selector for posting archive appointments"""
@@ -882,9 +876,8 @@ class MinisterArchive(commands.Cog):
         """Post archive appointments to selected channel"""
         await interaction.response.defer()
 
+        alliance_conn = sqlite3.connect('db/alliance.sqlite')
         try:
-            # Get alliance database connection
-            alliance_conn = sqlite3.connect('db/alliance.sqlite')
             alliance_cursor = alliance_conn.cursor()
 
             # Get archive info
@@ -961,8 +954,6 @@ class MinisterArchive(commands.Cog):
                 )
                 embed.set_footer(text=f"Archive from {created_date} • Total: {len(appointments)} appointments")
                 await channel.send(embed=embed)
-
-            alliance_conn.close()
 
             # Show success message
             success_embed = discord.Embed(

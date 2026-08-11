@@ -1,6 +1,11 @@
+"""
+Notification event editor. UI for creating and modifying notification events.
+"""
 import discord
 from discord.ext import commands
 import sqlite3
+import logging
+from contextlib import closing
 from datetime import datetime
 import re
 from .bear_event_types import get_event_icon
@@ -52,14 +57,13 @@ def format_repeat_interval(repeat_minutes, notification_id=None) -> str:
         if notification_id is None:
             return "Custom Days"
 
-        conn = sqlite3.connect("db/beartime.sqlite")
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT weekday FROM notification_days
-            WHERE notification_id = ?
-        """, (notification_id,))
-        rows = cursor.fetchall()
-        conn.close()
+        with closing(sqlite3.connect("db/beartime.sqlite")) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT weekday FROM notification_days
+                WHERE notification_id = ?
+            """, (notification_id,))
+            rows = cursor.fetchall()
 
         weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         day_set = set()
@@ -173,6 +177,7 @@ class EmbedFieldModal(discord.ui.Modal):
             await self.parent_view.cog.update_embed_notification(self.parent_view)
             await self.parent_view.update_embed_view(interaction)
         except Exception as e:
+            logger.error(f"Error in modal for {self.field_name}: {e}")
             print(f"Error in modal for {self.field_name}: {e}")
             await interaction.followup.send(f"An error occurred! {e}", ephemeral=True)
 
@@ -211,7 +216,7 @@ class EmbedDataView(discord.ui.View):
             try:
                 next_dt = datetime.fromisoformat(self.next_notification.replace("+00:00", ""))
                 example_date = next_dt.strftime("%b %d")
-            except:
+            except Exception:
                 example_date = "Dec 06"
         else:
             example_date = "Dec 06"
@@ -361,13 +366,12 @@ class EmbedDataView(discord.ui.View):
     async def notification_setting(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
 
-        conn = sqlite3.connect("db/beartime.sqlite")
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT channel_id, hour, minute, description, mention_type, repeat_minutes, next_notification, timezone, notification_type FROM bear_notifications WHERE id = ?",
-            (self.notification_id,))
-        result = cursor.fetchone()
-        conn.close()
+        with closing(sqlite3.connect("db/beartime.sqlite")) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT channel_id, hour, minute, description, mention_type, repeat_minutes, next_notification, timezone, notification_type FROM bear_notifications WHERE id = ?",
+                (self.notification_id,))
+            result = cursor.fetchone()
 
         if not result:
             await interaction.followup.send(f"{theme.deniedIcon} Notification not found in database.", ephemeral=True)
@@ -430,14 +434,14 @@ class PlainEditorView(discord.ui.View):
 
         if self.repeat == -1:
             try:
-                conn = sqlite3.connect("db/beartime.sqlite")
-                cursor = conn.cursor()
-                cursor.execute("SELECT weekday FROM notification_days WHERE notification_id = ?", (self.notification_id,))
-                weekday_value = cursor.fetchone()
-                if weekday_value:
-                    self.weekdays = weekday_value[0]
-                conn.close()
+                with closing(sqlite3.connect("db/beartime.sqlite")) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT weekday FROM notification_days WHERE notification_id = ?", (self.notification_id,))
+                    weekday_value = cursor.fetchone()
+                    if weekday_value:
+                        self.weekdays = weekday_value[0]
             except Exception as e:
+                logger.error(f"Failed to load weekdays: {e}")
                 print(f"Failed to load weekdays: {e}")
 
         for child in self.children:
@@ -480,6 +484,7 @@ class PlainEditorView(discord.ui.View):
             try:
                 await self.cog.start_edit_process(interaction, self.notification_id, original_message=self.message)
             except Exception as e:
+                logger.error(f"Error in edit_embed button: {e}")
                 print(f"error: {e}")
         elif "PLAIN_MESSAGE" in self.description:
             button.label = "Description"
@@ -520,6 +525,7 @@ class PlainEditorView(discord.ui.View):
                         await self.parent_view.cog.update_notification(self.parent_view)
                         await self.parent_view.update_embed(modal_interaction)
                     except Exception as e:
+                        logger.error(f"Error in DescriptionModal: {e}")
                         print(f"Error in DescriptionModal: {e}")
                         await modal_interaction.followup.send(f"{theme.deniedIcon} An error occurred!", ephemeral=True)
 
@@ -555,8 +561,7 @@ class PlainEditorView(discord.ui.View):
             def __init__(self, parent_view):
                 super().__init__()
                 self.parent_view = parent_view
-                next_notification_str = parent_view.next_notification.replace("+00:00", "")
-                current_dt = datetime.strptime(next_notification_str, "%Y-%m-%dT%H:%M:%S")
+                current_dt = datetime.fromisoformat(parent_view.next_notification)
                 saved_date = current_dt.strftime("%d/%m/%Y")
                 saved_hour = str(current_dt.hour)
                 saved_minute = str(current_dt.minute)
@@ -595,7 +600,7 @@ class PlainEditorView(discord.ui.View):
 
                     self.parent_view.hours = new_hours
                     self.parent_view.minutes = new_minutes
-                    self.parent_view.next_notification = new_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                    self.parent_view.next_notification = updated
 
                     await self.parent_view.cog.update_notification(self.parent_view)
                     await self.parent_view.update_embed(modal_interaction)
@@ -603,12 +608,14 @@ class PlainEditorView(discord.ui.View):
                 except ValueError:
                     await modal_interaction.followup.send(f"{theme.deniedIcon} Invalid input! Please enter numbers only.", ephemeral=True)
                 except Exception as e:
+                    logger.error(f"Error in TimeModal: {e}")
                     print(f"Error in TimeModal: {e}")
                     await modal_interaction.followup.send(f"{theme.deniedIcon} An error occurred!", ephemeral=True)
 
         try:
             await interaction.response.send_modal(TimeModal(self))
         except Exception as e:
+            logger.error(f"Error sending modal: {e}")
             print(f"Error sending modal: {e}")
 
     @discord.ui.button(label="Repeat", style=discord.ButtonStyle.primary)
@@ -687,6 +694,7 @@ class PlainEditorView(discord.ui.View):
                 )
 
             except Exception as e:
+                logger.error(f"Error in send_day_selector: {e}")
                 print(f"Error in send_day_selector: {e}")
 
         async def send_custom_modal(interaction: discord.Interaction, parent_view):
@@ -722,6 +730,7 @@ class PlainEditorView(discord.ui.View):
                         await self.parent_view.update_embed(modal_interaction)
 
                     except Exception as e:
+                        logger.error(f"Error in CustomRepeatModal: {e}")
                         print(f"Error in CustomRepeatModal: {e}")
                         await modal_interaction.followup.send(f"{theme.deniedIcon} An error occurred!", ephemeral=True)
 
@@ -930,10 +939,12 @@ class NotificationEditor(commands.Cog):
 
         channel_id, hours, minutes, description, mention, repeat, next_notification, timezone, notification_type, event_type = result
         if "EMBED_MESSAGE" in description:
-            cursor.execute(
-                "SELECT title, description, color, image_url, thumbnail_url, footer, author, mention_message FROM bear_notification_embeds WHERE notification_id = ?",
-                (notification_id,))
-            embed_results = cursor.fetchone()
+            if not embed_results:
+                await interaction.response.send_message(
+                    f"{theme.deniedIcon} Embed data is missing for this notification.",
+                    ephemeral=True
+                )
+                return
             title, embed_description, color, image_url, thumbnail_url, footer, author, mention_message = embed_results
 
             view = EmbedDataView(self, notification_id, title, embed_description, color, image_url, thumbnail_url,
@@ -989,68 +1000,72 @@ class NotificationEditor(commands.Cog):
                 await interaction.response.defer()
                 message = await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception as e:
+                logger.error(f"Error during PLAIN_MESSAGE handling: {e}")
                 print(f"[ERROR] During PLAIN_MESSAGE handling: {e}")
                 await interaction.followup.send(f"An error occurred in PLAIN_MESSAGE section. {e}", ephemeral=True)
                 return
         else:
-            print(f"No known format matched, description is {description}")
+            logger.warning(f"No known format matched, description is {description}")
+            await interaction.response.send_message(
+                f"{theme.deniedIcon} Could not parse this notification's format.",
+                ephemeral=True
+            )
+            return
 
         view.message = message
 
     async def update_notification(self, view):
-        conn = sqlite3.connect("db/beartime.sqlite")
-        cursor = conn.cursor()
+        with closing(sqlite3.connect("db/beartime.sqlite")) as conn:
+            cursor = conn.cursor()
 
-        if view.repeat == -1:
-            cursor.execute("DELETE FROM notification_days WHERE notification_id = ?", (view.notification_id,))
+            if view.repeat == -1:
+                cursor.execute("DELETE FROM notification_days WHERE notification_id = ?", (view.notification_id,))
 
-            weekday = getattr(view, "weekdays", "")
-            cursor.execute("INSERT INTO notification_days (notification_id, weekday) VALUES (?, ?)",(view.notification_id, weekday))
-        else:
-            cursor.execute("DELETE FROM notification_days WHERE notification_id = ?", (view.notification_id,))
+                weekday = getattr(view, "weekdays", "")
+                cursor.execute("INSERT INTO notification_days (notification_id, weekday) VALUES (?, ?)",(view.notification_id, weekday))
+            else:
+                cursor.execute("DELETE FROM notification_days WHERE notification_id = ?", (view.notification_id,))
 
-        cursor.execute(
-            "UPDATE bear_notifications SET channel_id = ?, hour = ?, minute = ?, description = ?, mention_type = ?, repeat_minutes = ?, next_notification = ?, notification_type = ? WHERE id = ?",
-            (view.channel_id, view.hours, view.minutes, view.description, view.mention, view.repeat,
-             view.next_notification, view.notification_type, view.notification_id)
-        )
-        conn.commit()
+            # Refresh the last-known channel name so quarantine DMs name the right channel.
+            channel_name = getattr(self.bot.get_channel(view.channel_id), "name", None)
+            cursor.execute(
+                "UPDATE bear_notifications SET channel_id = ?, channel_name = ?, hour = ?, minute = ?, description = ?, mention_type = ?, repeat_minutes = ?, next_notification = ?, notification_type = ? WHERE id = ?",
+                (view.channel_id, channel_name, view.hours, view.minutes, view.description, view.mention, view.repeat,
+                 view.next_notification, view.notification_type, view.notification_id)
+            )
+            conn.commit()
 
-        # Get guild_id for schedule board update
-        cursor.execute("SELECT guild_id FROM bear_notifications WHERE id = ?", (view.notification_id,))
-        result = cursor.fetchone()
-        guild_id = result[0] if result else None
-
-        conn.close()
+            # Get guild_id for schedule board update
+            cursor.execute("SELECT guild_id FROM bear_notifications WHERE id = ?", (view.notification_id,))
+            result = cursor.fetchone()
+            guild_id = result[0] if result else None
 
         # Notify schedule boards of update
         if guild_id:
-            schedule_cog = self.bot.get_cog("BearTrapSchedule")
+            schedule_cog = self.bot.get_cog("NotificationSchedule")
             if schedule_cog:
                 await schedule_cog.on_notification_updated(guild_id, view.channel_id)
 
     async def update_embed_notification(self, view):
-        conn = sqlite3.connect("db/beartime.sqlite")
-        cursor = conn.cursor()
+        with closing(sqlite3.connect("db/beartime.sqlite")) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute(
-            "UPDATE bear_notification_embeds SET title = ?, description = ?, color = ?, image_url = ?, thumbnail_url = ?, footer = ?, author = ?, mention_message = ? WHERE notification_id = ?",
-            (view.title, view.embed_description, view.color, view.image_url, view.thumbnail_url, view.footer,
-             view.author, view.mention_message, view.notification_id)
-        )
-        conn.commit()
+            cursor.execute(
+                "UPDATE bear_notification_embeds SET title = ?, description = ?, color = ?, image_url = ?, thumbnail_url = ?, footer = ?, author = ?, mention_message = ? WHERE notification_id = ?",
+                (view.title, view.embed_description, view.color, view.image_url, view.thumbnail_url, view.footer,
+                 view.author, view.mention_message, view.notification_id)
+            )
+            conn.commit()
 
-        # Get guild_id and channel_id for schedule board update
-        cursor.execute("SELECT guild_id, channel_id FROM bear_notifications WHERE id = ?", (view.notification_id,))
-        result = cursor.fetchone()
-
-        conn.close()
+            # Get guild_id and channel_id for schedule board update
+            cursor.execute("SELECT guild_id, channel_id FROM bear_notifications WHERE id = ?", (view.notification_id,))
+            result = cursor.fetchone()
 
         if result:
             guild_id, channel_id = result
 
             # Notify schedule boards of update
-            schedule_cog = self.bot.get_cog("BearTrapSchedule")
+            schedule_cog = self.bot.get_cog("NotificationSchedule")
             if schedule_cog:
                 await schedule_cog.on_notification_updated(guild_id, channel_id)
 

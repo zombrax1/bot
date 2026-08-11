@@ -326,6 +326,8 @@ class GiftCodeAPI:
                                                     # Re-test soon instead of waiting for the 2h periodic loop.
                                                     gift_operations.schedule_revalidation(code, "api")
                                             else:
+                                                # Cog missing: validity is unknown, so is_valid stays None.
+                                                is_valid = None
                                                 self.logger.error("GiftOperations cog not found for validation!")
                                                 validation_status = f"{theme.deniedIcon} Error"
                                                 auto_alliances = []
